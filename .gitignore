@@ -1,0 +1,6 @@
+# build output
+bin/
+obj/
+
+# runtime artefacts
+*.log
