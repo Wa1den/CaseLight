@@ -46,6 +46,7 @@ static class Program
                 case "mark": return Mark(client, args);
                 case "walk": return Walk(client, args);
                 case "fill": return Fill(client, args);
+                case "zones": return Zones(client, args);
                 case "off": return Off(client, args);
                 default: Usage(); return 2;
             }
@@ -258,6 +259,41 @@ static class Program
         client.UpdateLeds(dev, colors);
 
         Console.WriteLine($"[{dev}] {devices[dev].Name}: {colors.Length} диодов -> ({r},{g},{b})");
+        return 0;
+    }
+
+    /// <summary>
+    /// Paints every zone of a device a different colour at once, so one glance at the case
+    /// tells which header carries what. Beats filling them one at a time and trying to
+    /// remember what changed.
+    /// </summary>
+    static int Zones(OpenRgbClient client, string[] args)
+    {
+        if (!Resolve(client, args, 1, out var devices, out int dev)) return 2;
+
+        GoDirect(client, devices, dev);
+
+        var palette = new[]
+        {
+            (new Color(255, 255, 255), "белый"),
+            (new Color(255, 0, 0), "красный"),
+            (new Color(0, 255, 0), "зелёный"),
+            (new Color(0, 80, 255), "синий"),
+            (new Color(255, 0, 255), "розовый"),
+            (new Color(255, 160, 0), "оранжевый")
+        };
+
+        var zones = devices[dev].Zones;
+        for (int z = 0; z < zones.Length; z++)
+        {
+            int count = (int)zones[z].LedCount;
+            if (count == 0) { Console.WriteLine($"  [{z}] {zones[z].Name}: пустая, пропущена"); continue; }
+
+            var (colour, name) = palette[z % palette.Length];
+            client.UpdateZoneLeds(dev, z, Enumerable.Repeat(colour, count).ToArray());
+            Console.WriteLine($"  [{z}] {zones[z].Name,-24} {count,4} диодов -> {name}");
+        }
+
         return 0;
     }
 

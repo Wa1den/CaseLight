@@ -1,0 +1,222 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using CaseLight.Model;
+using OpenRGB.NET;
+
+namespace CaseLight.Rgb;
+
+/// <summary>One zone of a controller, as the UI needs to see it.</summary>
+public sealed record ZoneInfo(int Index, string Name, int LedCount, int FirstGlobalLed);
+
+/// <summary>One controller, as the UI needs to see it.</summary>
+public sealed record DeviceInfo(int Index, string Name, string Location, string Type,
+                                int LedCount, ZoneInfo[] Zones);
+
+/// <summary>
+/// The only thing that talks to OpenRGB.
+///
+/// Two things it has to survive. The controller list is renumbered whenever detection
+/// changes - disabling one GPU detector shifted every device below it - so bindings are
+/// resolved by name and re-resolved after every reconnect. And the server itself dies:
+/// three access violations in ten minutes during calibration, so a dropped connection is
+/// an expected state rather than an error.
+/// </summary>
+public sealed class RgbHub : IDisposable
+{
+    OpenRgbClient? _client;
+    Device[] _devices = Array.Empty<Device>();
+
+    /// <summary>Accumulated colour per device per LED, plus how many fixtures contributed.</summary>
+    readonly Dictionary<int, (double[] r, double[] g, double[] b, int[] hits)> _frame = new();
+
+    long _lastAttempt;
+
+    public bool IsConnected => _client != null;
+    public string Status { get; private set; } = "не подключено";
+    public DeviceInfo[] Devices { get; private set; } = Array.Empty<DeviceInfo>();
+
+    /// <summary>Safe to call repeatedly; a failure is not retried for a couple of seconds.</summary>
+    public bool Connect(bool force = false)
+    {
+        if (IsConnected && !force) return true;
+
+        long now = Environment.TickCount64;
+        if (!force && now - _lastAttempt < 2000) return false;
+        _lastAttempt = now;
+
+        try
+        {
+            _client?.Dispose();
+            _client = new OpenRgbClient(name: "CaseLight");
+            Refresh();
+        }
+        catch (Exception ex)
+        {
+            _client = null;
+            _devices = Array.Empty<Device>();
+            Devices = Array.Empty<DeviceInfo>();
+            Status = "нет связи с OpenRGB: " + ex.Message;
+            return false;
+        }
+
+        Status = $"подключено, контроллеров с диодами: {Devices.Length}";
+        return true;
+    }
+
+    /// <summary>Re-reads the controller list; call after anything that could renumber it.</summary>
+    public void Refresh()
+    {
+        if (_client == null) return;
+
+        _devices = _client.GetAllControllerData();
+
+        var list = new List<DeviceInfo>();
+        for (int i = 0; i < _devices.Length; i++)
+        {
+            var d = _devices[i];
+            if (d.Leds.Length == 0) continue;   // empty stubs are not worth showing
+
+            var zones = new List<ZoneInfo>();
+            int running = 0;
+            for (int z = 0; z < d.Zones.Length; z++)
+            {
+                zones.Add(new ZoneInfo(z, d.Zones[z].Name, (int)d.Zones[z].LedCount, running));
+                running += (int)d.Zones[z].LedCount;
+            }
+
+            list.Add(new DeviceInfo(i, d.Name, d.Location, d.Type.ToString(), d.Leds.Length, zones.ToArray()));
+        }
+
+        Devices = list.ToArray();
+
+        // Per-LED control has to be re-established after every reconnect: a restarted
+        // server brings its devices back in whatever mode they defaulted to.
+        foreach (var info in Devices)
+        {
+            try { _client.SetCustomMode(info.Index); }
+            catch { /* одно упрямое устройство не должно ронять остальные */ }
+        }
+    }
+
+    /// <summary>
+    /// Finds the live device a binding refers to. Matching is by name, with the location
+    /// breaking ties between two identical controllers.
+    /// </summary>
+    public DeviceInfo? Find(Binding binding)
+    {
+        if (string.IsNullOrWhiteSpace(binding.DeviceName)) return null;
+
+        var byName = Devices.Where(d => d.Name == binding.DeviceName).ToArray();
+        if (byName.Length == 0) return null;
+        if (byName.Length == 1 || string.IsNullOrEmpty(binding.DeviceLocation)) return byName[0];
+
+        return byName.FirstOrDefault(d => d.Location == binding.DeviceLocation) ?? byName[0];
+    }
+
+    // ---- кадр -------------------------------------------------------------
+
+    public void BeginFrame()
+    {
+        foreach (var info in Devices)
+        {
+            if (!_frame.TryGetValue(info.Index, out var buf) || buf.r.Length != info.LedCount)
+            {
+                buf = (new double[info.LedCount], new double[info.LedCount],
+                       new double[info.LedCount], new int[info.LedCount]);
+                _frame[info.Index] = buf;
+            }
+
+            Array.Clear(buf.r); Array.Clear(buf.g); Array.Clear(buf.b); Array.Clear(buf.hits);
+        }
+    }
+
+    /// <summary>
+    /// Contributes a colour to one LED of a binding.
+    ///
+    /// Several fixtures may legitimately land on the same LED - the three single fans are
+    /// wired in parallel, so one run of 32 drives three frames in three different places.
+    /// They cannot be lit differently, so their contributions are averaged instead of the
+    /// last one silently winning.
+    /// </summary>
+    public void Contribute(Binding binding, int ledInBinding, byte r, byte g, byte b)
+    {
+        var info = Find(binding);
+        if (info == null) return;
+        if (binding.ZoneIndex < 0 || binding.ZoneIndex >= info.Zones.Length) return;
+
+        int global = info.Zones[binding.ZoneIndex].FirstGlobalLed + binding.FirstLed + ledInBinding;
+        if (global < 0 || global >= info.LedCount) return;
+
+        if (!_frame.TryGetValue(info.Index, out var buf)) return;
+
+        buf.r[global] += r;
+        buf.g[global] += g;
+        buf.b[global] += b;
+        buf.hits[global]++;
+    }
+
+    /// <summary>Sends every device one full array; unlit LEDs go out black.</summary>
+    public bool EndFrame()
+    {
+        if (_client == null) return false;
+
+        try
+        {
+            foreach (var info in Devices)
+            {
+                if (!_frame.TryGetValue(info.Index, out var buf)) continue;
+
+                var colors = new Color[info.LedCount];
+                for (int i = 0; i < info.LedCount; i++)
+                {
+                    int hits = buf.hits[i];
+                    colors[i] = hits == 0
+                        ? new Color(0, 0, 0)
+                        : new Color((byte)(buf.r[i] / hits), (byte)(buf.g[i] / hits), (byte)(buf.b[i] / hits));
+                }
+
+                _client.UpdateLeds(info.Index, colors);
+            }
+        }
+        catch (Exception ex)
+        {
+            Status = "связь потеряна: " + ex.Message;
+            _client?.Dispose();
+            _client = null;
+            return false;
+        }
+
+        return true;
+    }
+
+    /// <summary>Lights one fixture and blacks out everything else - used to identify it in the case.</summary>
+    public void Highlight(Fixture fixture, byte r, byte g, byte b)
+    {
+        BeginFrame();
+        for (int i = 0; i < fixture.Binding.LedCount; i++)
+            Contribute(fixture.Binding, i, r, g, b);
+        EndFrame();
+    }
+
+    /// <summary>Lights a single LED of a fixture, for finding which one is the bottom.</summary>
+    public void HighlightLed(Fixture fixture, int led, byte r, byte g, byte b)
+    {
+        BeginFrame();
+        if (led >= 0 && led < fixture.Binding.LedCount)
+            Contribute(fixture.Binding, led, r, g, b);
+        EndFrame();
+    }
+
+    public void Blackout()
+    {
+        BeginFrame();
+        EndFrame();
+    }
+
+    public void Dispose()
+    {
+        try { _client?.Dispose(); } catch { /* уже отвалилось */ }
+        _client = null;
+    }
+}

@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <!-- Matches Ambilight.Core, whose capture backends need the Windows 10 SDK surface. -->
+    <TargetFramework>net9.0-windows10.0.22621.0</TargetFramework>
+    <SupportedOSPlatformVersion>10.0.22621.0</SupportedOSPlatformVersion>
+    <UseWPF>true</UseWPF>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <Platforms>x64</Platforms>
+    <PlatformTarget>x64</PlatformTarget>
+    <RootNamespace>CaseLight</RootNamespace>
+    <AssemblyName>CaseLight</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="OpenRGB.NET" Version="3.1.1" />
+
+    <!-- Frame bus, colour pipeline and the capture backends, shared with Ambilight.
+         Referenced by relative path: the two projects are separate repositories that
+         happen to sit side by side under Arduino\. -->
+    <ProjectReference Include="..\..\..\Ambilight\src\Ambilight.Core\Ambilight.Core.csproj" />
+  </ItemGroup>
+
+</Project>
