@@ -70,13 +70,20 @@ static class Program
 
         root.Children.Add(Row("Устройство и зона:", _deviceBox, _zoneBox, reconnect));
 
-        // длина зоны
-        _lengthBox = new TextBox { Width = 70, Margin = new Thickness(0, 0, 8, 0) };
-        var applyLength = new Button { Content = "Применить длину", Padding = new Thickness(12, 4, 12, 4) };
-        applyLength.Click += (_, _) => ApplyLength();
-        _limitText = new TextBlock { VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(8, 0, 0, 0), Opacity = 0.7 };
+        // длина зоны - вводится вручную, любая
+        _lengthBox = new TextBox { Width = 70, Margin = new Thickness(0, 0, 8, 0), VerticalContentAlignment = VerticalAlignment.Center };
+        _lengthBox.KeyDown += (_, e) => { if (e.Key == Key.Enter) { ApplyLength(); e.Handled = true; } };
 
-        root.Children.Add(Row("Длина зоны:", _lengthBox, applyLength, _limitText));
+        var applyLength = new Button { Content = "Применить", Padding = new Thickness(12, 4, 12, 4), Margin = new Thickness(0, 0, 8, 0) };
+        applyLength.Click += (_, _) => ApplyLength();
+
+        root.Children.Add(Row("Длина зоны:", _lengthBox, applyLength,
+                              LengthPreset("41", 41, "одна вертушка: 9 на крыльчатке + 32 на рамке"),
+                              LengthPreset("120", 120, "потолок, который называет сервер для хедеров"),
+                              LengthPreset("240", 240, "проверить, врёт ли потолок")));
+
+        _limitText = new TextBlock { Margin = new Thickness(150, 0, 0, 6), Opacity = 0.7, TextWrapping = TextWrapping.Wrap };
+        root.Children.Add(_limitText);
 
         // крупный счётчик
         _indexText = new TextBlock
@@ -164,6 +171,20 @@ static class Program
         });
         foreach (var i in items) panel.Children.Add(i);
         return panel;
+    }
+
+    /// <summary>Fills the length box and applies it in one press - these are the numbers asked for most.</summary>
+    static Button LengthPreset(string caption, int value, string tooltip)
+    {
+        var b = new Button
+        {
+            Content = caption,
+            Padding = new Thickness(10, 4, 10, 4),
+            Margin = new Thickness(0, 0, 6, 0),
+            ToolTip = tooltip
+        };
+        b.Click += (_, _) => { _lengthBox.Text = value.ToString(); ApplyLength(); };
+        return b;
     }
 
     static Button StepButton(string caption, int delta)
@@ -280,9 +301,13 @@ static class Program
 
         var zone = _devices[d].Zones[z];
         _lengthBox.Text = zone.LedCount.ToString();
+
+        // Reported as information, not as a rule. The driver's idea of the limits is a
+        // guess of its own, and refusing to try a larger number would leave devices it
+        // pins at a single LED - the GPU among them - impossible to explore at all.
         _limitText.Text = zone.LedsMin == zone.LedsMax
-            ? $"длина жёсткая: {zone.LedsMin}"
-            : $"допустимо {zone.LedsMin}..{zone.LedsMax}";
+            ? $"сервер считает длину жёсткой ({zone.LedsMin}), но попробовать можно любую"
+            : $"сервер называет предел {zone.LedsMin}..{zone.LedsMax}";
 
         SetIndex(0);
     }
@@ -292,14 +317,14 @@ static class Program
         int d = CurrentDevice(), z = CurrentZone();
         if (d < 0 || z < 0 || _client == null) return;
 
-        if (!int.TryParse(_lengthBox.Text, out int size)) { Status("Длина должна быть числом."); return; }
-
-        var zone = _devices[d].Zones[z];
-        if (size < zone.LedsMin || size > zone.LedsMax)
+        if (!int.TryParse(_lengthBox.Text, out int size) || size < 0)
         {
-            Status($"Длина вне предела {zone.LedsMin}..{zone.LedsMax}.");
+            Status("Длина должна быть неотрицательным числом.");
             return;
         }
+
+        var zone = _devices[d].Zones[z];
+        bool beyond = size < zone.LedsMin || size > zone.LedsMax;
 
         try
         {
@@ -308,13 +333,26 @@ static class Program
             // the layout changed underneath, so re-read rather than trust our copy
             _devices = _client.GetAllControllerData();
         }
-        catch (Exception ex) { Status("Не удалось задать длину: " + ex.Message); return; }
+        catch (Exception ex)
+        {
+            Status($"Сервер не принял длину {size}: {ex.Message}");
+            return;
+        }
 
         int keep = _zoneBox.SelectedIndex;
         OnDeviceChanged();
         if (keep >= 0 && keep < _zoneBox.Items.Count) _zoneBox.SelectedIndex = keep;
 
-        Status($"Длина зоны задана: {size}.");
+        // Asking is not getting: the server may quietly clamp, so report what actually
+        // took effect rather than what we requested.
+        int actual = ZoneCount();
+        string note = actual == size
+            ? $"Длина зоны задана: {actual}."
+            : $"Просили {size}, сервер оставил {actual}.";
+
+        if (beyond) note += $" (за пределом {zone.LedsMin}..{zone.LedsMax}, который он сам объявил)";
+
+        Status(note);
     }
 
     // ---- показ -----------------------------------------------------------
