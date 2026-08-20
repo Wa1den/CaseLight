@@ -2,12 +2,21 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
+using System.Windows;
 using Ambilight.Frames;
 using Ambilight.Leds;
 using CaseLight.Model;
 using CaseLight.Rgb;
 
 namespace CaseLight.Render;
+
+/// <summary>A stand-in for the screen: one patch of colour at a place on the scene.</summary>
+public sealed class TestPatch
+{
+    public double CenterX, CenterY, SizeMm;
+    public bool Circle = true;
+    public byte R = 255, G = 64, B = 32;
+}
 
 /// <summary>
 /// Drives the case from the screen.
@@ -37,6 +46,9 @@ public sealed class CasePainter : IDisposable
     LedZone[] _zones = Array.Empty<LedZone>();
     Target[] _targets = Array.Empty<Target>();
 
+    /// <summary>Where each LED physically is - the test patch works in scene space, not screen space.</summary>
+    Point[] _world = Array.Empty<Point>();
+
     /// <summary>How often each device is written, in frames. Slow buses get a larger number.</summary>
     readonly Dictionary<int, int> _deviceDivider = new();
     readonly HashSet<int> _dueNow = new();
@@ -44,14 +56,31 @@ public sealed class CasePainter : IDisposable
     int _resolvedGeneration = -1;
     long _frameNo;
 
+    volatile bool _paused;
+    string _pauseReason = "";
+
+    /// <summary>Nothing is written to the hardware until this moment passes.</summary>
+    long _holdUntilTicks;
+
+    /// <summary>Reference assignment is atomic, so the UI can swap this in at any moment.</summary>
+    volatile TestPatch? _test;
+
     byte[] _image = Array.Empty<byte>();
     byte[] _sampled = Array.Empty<byte>();
     byte[] _output = Array.Empty<byte>();
 
     public string Status { get; private set; } = "остановлено";
     public bool IsRunning => _running;
+    public bool IsPaused => _paused;
+    public string PauseReason => _pauseReason;
     public long FramesPainted { get; private set; }
     public double Fps { get; private set; }
+
+    /// <summary>Frames taken off the bus, and how stale the last one was.</summary>
+    public long FramesReceived { get; private set; }
+    public long LastFrameAgeMs { get; private set; }
+    public string SourceInfo { get; private set; } = "—";
+    public int LedCount => _targets.Length;
 
     public CasePainter(RgbHub hub, Scene scene)
     {
@@ -67,6 +96,11 @@ public sealed class CasePainter : IDisposable
         _scene = scene;
         _rebuild = true;
     }
+
+    /// <summary>Null returns to painting from the screen.</summary>
+    public void SetTest(TestPatch? patch) => _test = patch;
+
+    public bool TestActive => _test != null;
 
     public void Start()
     {
@@ -96,6 +130,33 @@ public sealed class CasePainter : IDisposable
         Status = "остановлено";
     }
 
+    /// <summary>Darkens the case and stops writing - for lock, sleep and display off.</summary>
+    public void Pause(string reason)
+    {
+        if (_paused) return;
+
+        _pauseReason = reason;
+        _paused = true;
+        _hub.Blackout();
+    }
+
+    /// <summary>
+    /// Resumes, but not immediately after a wake.
+    ///
+    /// Devices are re-enumerated while the machine sleeps, and OpenRGB keeps its old handles
+    /// for a while afterwards - it was seen dying 41 seconds after a resume. Giving the bus
+    /// a few seconds costs nothing and keeps us from being the one that pokes it.
+    /// </summary>
+    public void Resume(int delayMs = 0)
+    {
+        if (!_paused && delayMs <= 0) return;
+
+        _paused = false;
+        _pauseReason = "";
+        _holdUntilTicks = Environment.TickCount64 + Math.Max(0, delayMs);
+        _pipeline.Reset(_zones.Length);   // не разгораться из устаревших цветов
+    }
+
     void Loop()
     {
         try { PaintLoop(); }
@@ -119,27 +180,30 @@ public sealed class CasePainter : IDisposable
         {
             int periodMs = (int)Math.Round(1000.0 / Math.Clamp(_scene.MaxFps, 1, 120));
 
+            if (_paused)
+            {
+                Status = "пауза: " + _pauseReason;
+                Thread.Sleep(200);
+                continue;
+            }
+
+            long hold = _holdUntilTicks - Environment.TickCount64;
+            if (hold > 0)
+            {
+                Status = $"жду, пока железо очнётся после сна: {hold / 1000.0:F0} с";
+                Thread.Sleep(Math.Min(500, (int)hold));
+                continue;
+            }
+
+            // Между кадрами, а не внутри: перечитывание меняет длины буферов.
+            _hub.RefreshIfStale();
+
             // A reconnect renumbers the controllers, so resolved indices have to be redone
             // before they address the wrong hardware.
             if (_rebuild || _hub.Generation != _resolvedGeneration)
             {
                 _rebuild = false;
                 Rebuild();
-            }
-
-            if (!_bus.TryAttach())
-            {
-                Status = "жду кадры: " + _bus.Status;
-                Thread.Sleep(200);
-                continue;
-            }
-
-            if (!_bus.TryRead(ref _image, out var info))
-            {
-                // No new frame is normal - a still screen produces none at all. The LEDs
-                // keep whatever they had rather than blinking off.
-                Thread.Sleep(periodMs);
-                continue;
             }
 
             if (_targets.Length == 0)
@@ -156,7 +220,16 @@ public sealed class CasePainter : IDisposable
                 continue;
             }
 
-            ZoneSampler.Sample(_image, info.Width, info.Height, info.Stride, _zones, _sampled);
+            var test = _test;
+            if (test != null)
+            {
+                FillFromTest(test);
+                SourceInfo = "тестовое пятно";
+            }
+            else if (!TakeScreenFrame(periodMs))
+            {
+                continue;
+            }
 
             double now = clock.Elapsed.TotalMilliseconds;
             double dt = now - lastMs;
@@ -201,10 +274,67 @@ public sealed class CasePainter : IDisposable
                 Fps = framesThisSecond * 1000.0 / (tick - fpsWindow);
                 framesThisSecond = 0;
                 fpsWindow = tick;
-                Status = $"идёт раскраска, {Fps:F0} к/с, кадр {info.Width}×{info.Height}";
+                Status = test != null
+                    ? $"тест размещения, {Fps:F0} к/с"
+                    : $"идёт раскраска, {Fps:F0} к/с";
             }
 
             Thread.Sleep(periodMs);
+        }
+    }
+
+    /// <summary>Pulls one frame off the bus; false means there is nothing to paint this tick.</summary>
+    bool TakeScreenFrame(int periodMs)
+    {
+        if (!_bus.TryAttach())
+        {
+            Status = "жду кадры: " + _bus.Status;
+            SourceInfo = "нет источника";
+            Thread.Sleep(200);
+            return false;
+        }
+
+        if (!_bus.TryRead(ref _image, out var info))
+        {
+            // No new frame is normal - a still screen produces none at all. The LEDs keep
+            // whatever they had rather than blinking off.
+            Thread.Sleep(periodMs);
+            return false;
+        }
+
+        FramesReceived++;
+        LastFrameAgeMs = info.AgeMs;
+        SourceInfo = $"Ambilight, {info.Width}×{info.Height}, экран {info.MonitorDeviceName}";
+
+        ZoneSampler.Sample(_image, info.Width, info.Height, info.Stride, _zones, _sampled);
+        return true;
+    }
+
+    /// <summary>
+    /// Paints straight from the movable patch instead of the screen.
+    ///
+    /// Deliberately bypasses the zone sampling: the patch is a shape on the scene, so the
+    /// only question is whether an LED stands inside it. Everything after this - colour,
+    /// gamma, smoothing - is the path the real picture takes, so what the test shows is
+    /// what real content will do.
+    /// </summary>
+    void FillFromTest(TestPatch patch)
+    {
+        double half = patch.SizeMm / 2;
+
+        for (int i = 0; i < _world.Length && i * 3 + 2 < _sampled.Length; i++)
+        {
+            double dx = _world[i].X - patch.CenterX;
+            double dy = _world[i].Y - patch.CenterY;
+
+            bool inside = patch.Circle
+                ? dx * dx + dy * dy <= half * half
+                : Math.Abs(dx) <= half && Math.Abs(dy) <= half;
+
+            int o = i * 3;
+            _sampled[o] = inside ? patch.R : (byte)0;
+            _sampled[o + 1] = inside ? patch.G : (byte)0;
+            _sampled[o + 2] = inside ? patch.B : (byte)0;
         }
     }
 
@@ -215,6 +345,9 @@ public sealed class CasePainter : IDisposable
         Saturation = _scene.Saturation,
         Gamma = _scene.Gamma,
         TemperatureK = _scene.TemperatureK,
+        GainR = _scene.GainR,
+        GainG = _scene.GainG,
+        GainB = _scene.GainB,
         SmoothingRise = _scene.SmoothingRise,
         SmoothingFall = _scene.SmoothingFall,
         Dithering = false        // дизеринг разносит ошибку вдоль ленты; здесь диоды не в ряд
@@ -231,6 +364,7 @@ public sealed class CasePainter : IDisposable
     {
         var zones = new List<LedZone>();
         var targets = new List<Target>();
+        var world = new List<Point>();
 
         _deviceDivider.Clear();
 
@@ -259,13 +393,13 @@ public sealed class CasePainter : IDisposable
                 ? Math.Min(existing, divider)
                 : divider;
 
-            var world = LedGeometry.World(f);
-            int count = Math.Min(available, world.Length);
+            var positions = LedGeometry.World(f);
+            int count = Math.Min(available, positions.Length);
 
             for (int i = 0; i < count; i++)
             {
-                double u = (world[i].X - left) / w;
-                double v = (world[i].Y - top) / h;
+                double u = (positions[i].X - left) / w;
+                double v = (positions[i].Y - top) / h;
 
                 // outside the panel the nearest edge is what this LED can honestly show
                 u = Math.Clamp(u, 0, 1);
@@ -275,11 +409,13 @@ public sealed class CasePainter : IDisposable
                                       Math.Clamp(u + ru, 0, 1), Math.Clamp(v + rv, 0, 1),
                                       Side.Bottom));
                 targets.Add(new Target(device, firstGlobal + i));
+                world.Add(positions[i]);
             }
         }
 
         _zones = zones.ToArray();
         _targets = targets.ToArray();
+        _world = world.ToArray();
         _sampled = new byte[_zones.Length * 3];
         _output = new byte[_zones.Length * 3];
         _pipeline.Reset(_zones.Length);

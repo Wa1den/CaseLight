@@ -27,9 +27,27 @@ public sealed class SceneView : FrameworkElement
     double _scale = 0.6;
     Point _origin = new(40, 40);
 
-    enum Drag { None, Move, Resize, Rotate, Pan }
+    // ---- тест размещения --------------------------------------------------
+
+    /// <summary>
+    /// A movable patch of light that stands in for the screen.
+    ///
+    /// Checking a layout against real content is guesswork - the picture changes faster
+    /// than you can look at the case. A single spot you drag by hand answers the only
+    /// question that matters: does the thing that lights up correspond to where the spot is.
+    /// </summary>
+    public bool TestMode { get; set; }
+    public Point TestCenter { get; set; }
+    public double TestSizeMm { get; set; } = 150;
+    public TestShape TestShape { get; set; } = TestShape.Circle;
+    public Color TestColor { get; set; } = Colors.OrangeRed;
+
+    public event EventHandler? TestMoved;
+
+    enum Drag { None, Move, Resize, Rotate, Pan, TestPatch }
     Drag _drag = Drag.None;
     int _resizeCorner;
+    Point _testStart;
     Point _dragStart;
     Fixture _before = new();
     Point _originStart;
@@ -95,7 +113,35 @@ public sealed class SceneView : FrameworkElement
         foreach (var f in Scene.Fixtures)
             DrawFixture(dc, f, f == Selected);
 
-        if (Selected != null) DrawHandles(dc, Selected);
+        if (Selected != null && !TestMode) DrawHandles(dc, Selected);
+        if (TestMode) DrawTestPatch(dc);
+    }
+
+    void DrawTestPatch(DrawingContext dc)
+    {
+        var centre = ToScreen(TestCenter);
+        double halfPx = TestSizeMm / 2 * _scale;
+
+        var fill = new SolidColorBrush(Color.FromArgb(150, TestColor.R, TestColor.G, TestColor.B));
+        var pen = new Pen(Brushes.White, 1.5);
+
+        if (TestShape == TestShape.Circle)
+            dc.DrawEllipse(fill, pen, centre, halfPx, halfPx);
+        else
+            dc.DrawRectangle(fill, pen, new Rect(centre.X - halfPx, centre.Y - halfPx, halfPx * 2, halfPx * 2));
+
+        Label(dc, "тестовое пятно — тяни мышью", new Point(centre.X - halfPx, centre.Y - halfPx - 18),
+              Colors.White, 12);
+    }
+
+    bool HitTestPatch(Point px)
+    {
+        var centre = ToScreen(TestCenter);
+        double halfPx = TestSizeMm / 2 * _scale;
+
+        return TestShape == TestShape.Circle
+            ? Distance(px, centre) <= halfPx
+            : Math.Abs(px.X - centre.X) <= halfPx && Math.Abs(px.Y - centre.Y) <= halfPx;
     }
 
     void DrawGrid(DrawingContext dc)
@@ -227,6 +273,14 @@ public sealed class SceneView : FrameworkElement
         Focus();
         var px = e.GetPosition(this);
 
+        // While testing, the patch is the only thing worth grabbing - moving fixtures at
+        // the same time would just make it impossible to tell what changed.
+        if (TestMode)
+        {
+            if (HitTestPatch(px)) { _drag = Drag.TestPatch; _dragStart = px; _testStart = TestCenter; CaptureMouse(); }
+            return;
+        }
+
         if (Selected != null)
         {
             if (Distance(px, RotateHandle(Selected)) <= HandleRadius + 3)
@@ -286,6 +340,16 @@ public sealed class SceneView : FrameworkElement
         if (_drag == Drag.Pan)
         {
             _origin = new Point(_originStart.X + (px.X - _dragStart.X), _originStart.Y + (px.Y - _dragStart.Y));
+            InvalidateVisual();
+            return;
+        }
+
+        if (_drag == Drag.TestPatch)
+        {
+            var grabbed = ToScene(_dragStart);
+            var now = ToScene(px);
+            TestCenter = new Point(_testStart.X + (now.X - grabbed.X), _testStart.Y + (now.Y - grabbed.Y));
+            TestMoved?.Invoke(this, EventArgs.Empty);
             InvalidateVisual();
             return;
         }

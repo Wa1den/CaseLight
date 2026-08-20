@@ -1,10 +1,11 @@
 using System;
-using System.Globalization;
 using System.Linq;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
 using System.Windows.Threading;
+using Ambilight.Capture;
+using Ambilight.Power;
 using CaseLight.Model;
 using CaseLight.Render;
 using CaseLight.Rgb;
@@ -20,58 +21,96 @@ namespace CaseLight;
 /// described by "LED 40 of 68", only by where that LED physically is. Everything else -
 /// which patch of screen it echoes, how often it is written - follows from that.
 /// </summary>
-public sealed class MainWindow : Window
+public sealed partial class MainWindow : Window
 {
     readonly RgbHub _hub = new();
     readonly SceneView _view = new();
-    readonly DispatcherTimer _statusTimer = new() { Interval = TimeSpan.FromMilliseconds(500) };
+    readonly PowerWatcher _power = new();
+    readonly DispatcherTimer _ui = new() { Interval = TimeSpan.FromMilliseconds(500) };
 
     Scene _scene = Scene.Load();
+    Scene _saved = null!;
     CasePainter _painter = null!;
 
-    ListBox _fixtureList = null!;
-    StackPanel _settings = null!;
-    StackPanel _properties = null!;
-    TextBlock _status = null!;
-    Button _runButton = null!;
+    System.Windows.Forms.NotifyIcon? _tray;
 
-    bool _syncing;
+    TabControl _tabs = null!;
+    Border _dirtyBar = null!;
+    Border _fixtureOverlay = null!;
+    StackPanel _fixturePanel = null!;
+    ListBox _fixtureList = null!;
+    TextBlock _status = null!;
+    TextBlock _captureStats = null!;
+    Button _testButton = null!;
+
+    bool _rebuildingUi;
+    bool _syncingList;
 
     public MainWindow()
     {
         Title = "CaseLight — подсветка корпуса";
-        Width = 1400;
-        Height = 900;
-        WindowStartupLocation = WindowStartupLocation.CenterScreen;
-        Background = new SolidColorBrush(Color.FromRgb(30, 32, 38));
+        Background = Ui.Bg;
+
+        ProbeLog.Configure(Scene.LogPath, _scene.WriteLog);
 
         try { Icon = new System.Windows.Media.Imaging.BitmapImage(new Uri("pack://application:,,,/icon.ico")); }
         catch { /* без иконки окно всё равно работает */ }
 
-        Content = BuildLayout();
-
+        _saved = _scene.Clone();
         _painter = new CasePainter(_hub, _scene);
 
-        _view.Scene = _scene;
-        _view.SelectionChanged += (_, _) => { SyncFixtureList(); BuildProperties(); };
-        _view.FixtureChanged += (_, _) => { _painter.Invalidate(); BuildProperties(); };
+        RestoreWindowGeometry();
+        Content = BuildLayout();
 
-        // While painting, the status line is the only sign anything is happening at all.
-        _statusTimer.Tick += (_, _) => { if (_painter.IsRunning) Say(_painter.Status); };
-        _statusTimer.Start();
+        _view.Scene = _scene;
+        _view.SelectionChanged += (_, _) => { SyncFixtureList(); ShowFixturePanel(); };
+        _view.FixtureChanged += (_, _) => { _painter.Invalidate(); BuildFixturePanel(); };
+        _view.TestMoved += (_, _) => PushTestPatch();
+
+        HookPower();
 
         Loaded += (_, _) =>
         {
+            _power.Attach(this);
+            SetupTray();
+
             ConnectHub();
+            RebuildTabs();
             SyncFixtureList();
             _view.FitToContent();
 
-            // On a cold boot OpenRGB may not be up yet; the paint loop waits for it by
-            // itself, so starting here is safe even when nothing is listening.
-            if (_scene.StartPaintingOnLaunch) TogglePainting();
+            if (_scene.StartMinimized) WindowState = WindowState.Minimized;
+            if (_scene.StartPaintingOnLaunch) StartPainting();
         };
 
-        Closed += (_, _) => { _painter.Dispose(); _scene.Save(); _hub.Dispose(); };
+        StateChanged += (_, _) =>
+        {
+            if (WindowState == WindowState.Minimized && _scene.MinimizeToTray) Hide();
+        };
+
+        _ui.Tick += (_, _) => RefreshUi();
+        _ui.Start();
+
+        Closing += (_, _) =>
+        {
+            SaveWindowGeometry();
+
+            if (_scene.OffOnExit) _hub.Blackout();
+
+            // Geometry is not something the user is editing, so it persists on its own -
+            // written onto the last applied state so pending edits stay discarded.
+            _saved.WindowWidth = _scene.WindowWidth;
+            _saved.WindowHeight = _scene.WindowHeight;
+            _saved.WindowLeft = _scene.WindowLeft;
+            _saved.WindowTop = _scene.WindowTop;
+            _saved.WindowMaximized = _scene.WindowMaximized;
+            _saved.Save();
+
+            if (_tray != null) { _tray.Visible = false; _tray.Dispose(); }
+            _painter.Dispose();
+            _power.Dispose();
+            _hub.Dispose();
+        };
     }
 
     // ---- каркас -----------------------------------------------------------
@@ -79,34 +118,65 @@ public sealed class MainWindow : Window
     UIElement BuildLayout()
     {
         var grid = new Grid();
-        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(290) });
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(440) });
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(330) });
         grid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
         grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
 
-        grid.Children.Add(BuildLeftColumn());
+        // ---- слева: вкладки и полоса применения
+        var left = new Grid { Margin = new Thickness(10, 10, 5, 10) };
+        left.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+        left.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
 
-        // ---- центр: сцена
-        var host = new Border { Margin = new Thickness(0, 10, 0, 10), Child = _view };
-        Grid.SetColumn(host, 1);
-        grid.Children.Add(host);
+        _tabs = new TabControl { Background = Ui.Bg, BorderBrush = new SolidColorBrush(Color.FromRgb(58, 58, 66)) };
 
-        // ---- справа: только выбранная фигура
-        _properties = new StackPanel { Margin = new Thickness(10) };
-        var scroll = new ScrollViewer { Content = _properties, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
-        Grid.SetColumn(scroll, 2);
-        grid.Children.Add(scroll);
+        // The fixture panel belongs to one tab only; leaving it hanging over the canvas
+        // while looking at, say, power settings is just clutter.
+        _tabs.SelectionChanged += (_, e) =>
+        {
+            if (e.Source == _tabs) HideFixturePanel();
+        };
+
+        Grid.SetRow(_tabs, 0);
+        left.Children.Add(_tabs);
+
+        _dirtyBar = BuildDirtyBar();
+        Grid.SetRow(_dirtyBar, 1);
+        left.Children.Add(_dirtyBar);
+
+        Grid.SetColumn(left, 0);
+        grid.Children.Add(left);
+
+        // ---- справа: холст и панель фигуры поверх него
+        var right = new Grid { Margin = new Thickness(5, 10, 10, 10) };
+        right.Children.Add(_view);
+
+        _fixturePanel = new StackPanel();
+        _fixtureOverlay = new Border
+        {
+            Background = new SolidColorBrush(Color.FromArgb(242, 34, 37, 44)),
+            BorderBrush = new SolidColorBrush(Color.FromRgb(70, 76, 88)),
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(6),
+            Padding = new Thickness(12),
+            Width = 340,
+            Margin = new Thickness(0, 10, 10, 10),
+            HorizontalAlignment = HorizontalAlignment.Right,
+            VerticalAlignment = VerticalAlignment.Stretch,
+            Visibility = Visibility.Collapsed,
+            Child = new ScrollViewer { Content = _fixturePanel, VerticalScrollBarVisibility = ScrollBarVisibility.Auto }
+        };
+        right.Children.Add(_fixtureOverlay);
+
+        Grid.SetColumn(right, 1);
+        grid.Children.Add(right);
 
         // ---- низ: действия и статус
-        var bottom = new StackPanel { Margin = new Thickness(10), Orientation = Orientation.Horizontal };
-
-        _runButton = SmallButton("Пуск раскраски", TogglePainting);
-        bottom.Children.Add(_runButton);
-        bottom.Children.Add(SmallButton("Погасить", () => { _hub.Blackout(); Say("Подсветка погашена."); }));
-        bottom.Children.Add(SmallButton("Переподключиться", ConnectHub));
-        bottom.Children.Add(SmallButton("Вписать в окно", () => _view.FitToContent()));
-        bottom.Children.Add(SmallButton("Сохранить", () => { _scene.Save(); Say("Раскладка сохранена: " + Scene.DefaultPath); }));
+        var bottom = new StackPanel { Margin = new Thickness(10, 0, 10, 10), Orientation = Orientation.Horizontal };
+        bottom.Children.Add(Ui.Btn("Старт", StartPainting));
+        bottom.Children.Add(Ui.Btn("Стоп", StopPainting));
+        bottom.Children.Add(Ui.Btn("Переподключиться", ConnectHub));
+        bottom.Children.Add(Ui.Btn("Центрировать холст", () => _view.FitToContent()));
 
         _status = new TextBlock
         {
@@ -118,489 +188,409 @@ public sealed class MainWindow : Window
         bottom.Children.Add(_status);
 
         Grid.SetRow(bottom, 1);
-        Grid.SetColumnSpan(bottom, 3);
+        Grid.SetColumnSpan(bottom, 2);
         grid.Children.Add(bottom);
 
         return grid;
     }
 
-    /// <summary>
-    /// Fixtures on top, everything that is not about a fixture underneath. There will never
-    /// be many devices, so the list does not need the whole height, and the general
-    /// settings are better here than mixed into the per-fixture panel.
-    /// </summary>
-    UIElement BuildLeftColumn()
+    Border BuildDirtyBar()
     {
-        var column = new Grid { Margin = new Thickness(10) };
-        column.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        column.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
-        column.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        column.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1.4, GridUnitType.Star) });
+        var apply = Ui.Btn("Применить", ApplyChanges);
+        var cancel = Ui.Btn("Отмена", CancelChanges);
 
-        var caption = Header("Фигуры");
-        Grid.SetRow(caption, 0);
-        column.Children.Add(caption);
+        var dock = new DockPanel();
+        DockPanel.SetDock(cancel, Dock.Right);
+        DockPanel.SetDock(apply, Dock.Right);
+        dock.Children.Add(cancel);
+        dock.Children.Add(apply);
+        dock.Children.Add(new TextBlock
+        {
+            Text = "Есть изменения, которые ещё не сохранены",
+            Foreground = Ui.Warn,
+            FontSize = 12,
+            VerticalAlignment = VerticalAlignment.Center,
+            TextWrapping = TextWrapping.Wrap
+        });
+
+        return new Border
+        {
+            Background = Ui.Panel,
+            CornerRadius = new CornerRadius(6),
+            Padding = new Thickness(10),
+            Margin = new Thickness(0, 8, 0, 0),
+            Visibility = Visibility.Collapsed,
+            Child = dock
+        };
+    }
+
+    // ---- вкладки ----------------------------------------------------------
+
+    void AddTab(string title, Action<StackPanel> build)
+    {
+        var panel = new StackPanel { Margin = new Thickness(12) };
+        build(panel);
+
+        _tabs.Items.Add(new TabItem
+        {
+            Header = title,
+            Content = new ScrollViewer { Content = panel, VerticalScrollBarVisibility = ScrollBarVisibility.Auto }
+        });
+    }
+
+    /// <summary>Rebuilt wholesale after Cancel or import, since every field may have moved.</summary>
+    void RebuildTabs()
+    {
+        _rebuildingUi = true;
+
+        int selected = _tabs.SelectedIndex;
+        _tabs.Items.Clear();
+
+        BuildGeneralTab();
+        BuildDevicesTab();
+        BuildCaptureTab();
+        BuildColorsTab();
+        BuildPowerTab();
+        BuildAboutTab();
+
+        if (selected >= 0 && selected < _tabs.Items.Count) _tabs.SelectedIndex = selected;
+
+        _rebuildingUi = false;
+    }
+
+    void BuildGeneralTab() => AddTab("Основное", panel =>
+    {
+        panel.Children.Add(Ui.Header("Окно"));
+        panel.Children.Add(Ui.Check("Сворачивать в трей", _scene.MinimizeToTray, v => { _scene.MinimizeToTray = v; Touch(); }));
+        panel.Children.Add(Ui.Check("Запускать свёрнутым", _scene.StartMinimized, v => { _scene.StartMinimized = v; Touch(); }));
+
+        panel.Children.Add(Ui.Header("Запуск"));
+        panel.Children.Add(Ui.Check("Запускать вместе с Windows", Autostart.IsEnabled(), v => Say(Autostart.Set(v))));
+        panel.Children.Add(Ui.Check("Сразу начинать раскраску", _scene.StartPaintingOnLaunch, v => { _scene.StartPaintingOnLaunch = v; Touch(); }));
+        panel.Children.Add(Ui.Note("Подсветкой распоряжается OpenRGB, и ему нужны права администратора. " +
+                                   "Автозапуск CaseLight поможет только если и OpenRGB стартует сам."));
+
+        panel.Children.Add(Ui.Header("Настройки"));
+        panel.Children.Add(Ui.Row(Ui.Btn("Экспорт…", ExportSettings), Ui.Btn("Импорт…", ImportSettings)));
+        panel.Children.Add(Ui.Note("Один файл со всем: раскладка, монитор, цвета, захват, питание."));
+
+        panel.Children.Add(Ui.Header("Журнал"));
+        panel.Children.Add(Ui.Check("Вести журнал", _scene.WriteLog, v =>
+        {
+            _scene.WriteLog = v;
+            ProbeLog.Configure(Scene.LogPath, v);
+            Touch();
+        }));
+        panel.Children.Add(Ui.Note(Scene.LogPath));
+    });
+
+    void BuildDevicesTab() => AddTab("Устройства", panel =>
+    {
+        panel.Children.Add(Ui.Header("Фигуры"));
 
         _fixtureList = new ListBox
         {
-            Background = new SolidColorBrush(Color.FromRgb(38, 41, 48)),
-            Foreground = Brushes.White,
-            BorderThickness = new Thickness(0)
+            Background = Ui.Panel,
+            Foreground = Ui.Fg,
+            BorderThickness = new Thickness(0),
+            Height = 260
         };
         _fixtureList.SelectionChanged += (_, _) =>
         {
-            if (_syncing) return;
+            if (_syncingList) return;
             _view.Select((_fixtureList.SelectedItem as FixtureItem)?.Fixture);
         };
-        Grid.SetRow(_fixtureList, 1);
-        column.Children.Add(_fixtureList);
+        panel.Children.Add(_fixtureList);
 
-        var buttons = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 6, 0, 0) };
-        buttons.Children.Add(SmallButton("Добавить", AddFixture));
-        buttons.Children.Add(SmallButton("Копия", DuplicateFixture));
-        buttons.Children.Add(SmallButton("Удалить", RemoveFixture));
-        Grid.SetRow(buttons, 2);
-        column.Children.Add(buttons);
+        panel.Children.Add(Ui.Row(
+            Ui.Btn("Добавить", AddFixture),
+            Ui.Btn("Копия", DuplicateFixture),
+            Ui.Btn("Удалить", RemoveFixture)));
 
-        _settings = new StackPanel();
-        var settingsScroll = new ScrollViewer
+        panel.Children.Add(Ui.Note("Выбери фигуру — её параметры откроются поверх холста."));
+
+        panel.Children.Add(Ui.Header("Монитор"));
+        panel.Children.Add(Ui.Note("Размер видимой картинки. От него считается, какой участок экрана видит каждый диод."));
+        panel.Children.Add(Ui.Num("Ширина, мм", _scene.Monitor.Width, v => { _scene.Monitor.Width = Math.Max(10, v); Touch(); }));
+        panel.Children.Add(Ui.Num("Высота, мм", _scene.Monitor.Height, v => { _scene.Monitor.Height = Math.Max(10, v); Touch(); }));
+
+        SyncFixtureList();
+    });
+
+    void BuildCaptureTab() => AddTab("Захват", panel =>
+    {
+        panel.Children.Add(Ui.Header("Источник кадров"));
+
+        var box = new ComboBox { Margin = new Thickness(0, 2, 0, 0) };
+        box.Items.Add("Получать от Ambilight");
+        box.SelectedIndex = 0;
+        box.IsEnabled = false;
+        panel.Children.Add(Ui.Labelled("Метод", box));
+        panel.Children.Add(Ui.Note("Пока доступен только приём кадров от Ambilight по разделяемой памяти. " +
+                                   "Собственный захват (DDA, WGC, GDI) появится здесь же — движок для него уже есть в общей библиотеке. " +
+                                   "Не забудь включить в Ambilight «Отдавать снимки экрана в модуль подсветки»."));
+
+        panel.Children.Add(Ui.Slide("Кадров в секунду", _scene.MaxFps, 1, 120, 1, v => { _scene.MaxFps = (int)v; Touch(); }));
+        panel.Children.Add(Ui.Note("Верхний предел для быстрых устройств. Медленным можно задать свой делитель в параметрах фигуры."));
+
+        panel.Children.Add(Ui.Header("Статистика"));
+        _captureStats = Ui.Mono();
+        panel.Children.Add(_captureStats);
+    });
+
+    void BuildPowerTab() => AddTab("Питание", panel =>
+    {
+        panel.Children.Add(Ui.Header("Гасить подсветку"));
+        panel.Children.Add(Ui.Check("при выходе из программы", _scene.OffOnExit, v => { _scene.OffOnExit = v; Touch(); }));
+        panel.Children.Add(Ui.Check("когда экран выключен", _scene.OffOnDisplayOff, v => { _scene.OffOnDisplayOff = v; Touch(); }));
+        panel.Children.Add(Ui.Check("при блокировке сессии", _scene.OffOnLock, v => { _scene.OffOnLock = v; Touch(); }));
+        panel.Children.Add(Ui.Check("при уходе в сон", _scene.OffOnSuspend, v => { _scene.OffOnSuspend = v; Touch(); }));
+
+        panel.Children.Add(Ui.Header("После пробуждения"));
+        panel.Children.Add(Ui.Slide("Пауза перед возвратом", _scene.ResumeDelayMs / 1000.0, 0, 30, 1,
+                                    v => { _scene.ResumeDelayMs = (int)(v * 1000); Touch(); }, " с"));
+        panel.Children.Add(Ui.Note("Во сне устройства переподключаются заново, и OpenRGB какое-то время держит устаревшие хендлы — " +
+                                   "в журнале Windows он падал через 41 секунду после пробуждения. Пауза нужна, чтобы не мы оказались " +
+                                   "теми, кто дёрнул шину в этот момент."));
+    });
+
+    void BuildAboutTab() => AddTab("О программе", panel =>
+    {
+        panel.Children.Add(Ui.Header("CaseLight"));
+        panel.Children.Add(Ui.Note("Подсветка корпуса как продолжение экрана."));
+        panel.Children.Add(Ui.Note("Кадры приходят от Ambilight, вывод идёт через OpenRGB."));
+    });
+
+    // ---- применить и отменить ---------------------------------------------
+
+    /// <summary>Called after any edit; the bar appears only when something really differs.</summary>
+    void Touch()
+    {
+        if (_rebuildingUi) return;
+
+        _view.InvalidateVisual();
+        _painter?.Invalidate();
+        UpdateDirtyBar();
+    }
+
+    void UpdateDirtyBar()
+    {
+        bool dirty = _scene.DiffersFrom(_saved);
+        _dirtyBar.Visibility = dirty ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    void ApplyChanges()
+    {
+        _saved = _scene.Clone();
+        _saved.Save();
+        UpdateDirtyBar();
+        Say("Настройки применены и сохранены.");
+    }
+
+    void CancelChanges()
+    {
+        // CopyFrom keeps the object identity the painter and the canvas already hold, so
+        // undoing a drag needs no rewiring - only a redraw.
+        _scene.CopyFrom(_saved);
+
+        _view.Select(null);
+        RebuildTabs();
+        SyncFixtureList();
+        _painter.Invalidate();
+        _view.InvalidateVisual();
+        UpdateDirtyBar();
+        Say("Изменения отменены.");
+    }
+
+    void ExportSettings()
+    {
+        var dialog = new Microsoft.Win32.SaveFileDialog
         {
-            Content = _settings,
-            VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
-            Margin = new Thickness(0, 10, 0, 0)
+            Title = "Экспорт настроек CaseLight",
+            Filter = "Настройки CaseLight (*.json)|*.json",
+            FileName = "caselight-settings.json"
         };
-        Grid.SetRow(settingsScroll, 3);
-        column.Children.Add(settingsScroll);
 
-        Grid.SetColumn(column, 0);
-        return column;
+        if (dialog.ShowDialog() != true) return;
+
+        try { _scene.Save(dialog.FileName); Say("Экспортировано: " + dialog.FileName); }
+        catch (Exception ex) { Say("Не удалось выгрузить: " + ex.Message); }
     }
 
-    sealed record FixtureItem(Fixture Fixture)
+    void ImportSettings()
     {
-        public override string ToString() =>
-            (Fixture.Enabled ? "" : "· выкл · ") + $"{Fixture.Name}  ({Fixture.LedCount})";
+        var dialog = new Microsoft.Win32.OpenFileDialog
+        {
+            Title = "Импорт настроек CaseLight",
+            Filter = "Настройки CaseLight (*.json)|*.json"
+        };
+
+        if (dialog.ShowDialog() != true) return;
+
+        try
+        {
+            var loaded = Scene.Import(dialog.FileName);
+            _scene.CopyFrom(loaded);
+
+            _view.Select(null);
+            RebuildTabs();
+            SyncFixtureList();
+            _painter.Invalidate();
+            _view.FitToContent();
+            UpdateDirtyBar();
+
+            Say("Импортировано. Проверь раскладку и нажми «Применить», если всё верно.");
+        }
+        catch (Exception ex)
+        {
+            Say("Не удалось прочитать файл: " + ex.Message);
+        }
     }
 
-    void SyncFixtureList()
+    // ---- питание, трей, статус --------------------------------------------
+
+    void HookPower()
     {
-        _syncing = true;
-        _fixtureList.Items.Clear();
-        foreach (var f in _scene.Fixtures) _fixtureList.Items.Add(new FixtureItem(f));
+        _power.Changed += (_, state) =>
+        {
+            string? reason =
+                state.Suspended && _scene.OffOnSuspend ? "сон" :
+                state.Locked && _scene.OffOnLock ? "блокировка" :
+                state.DisplayOff && _scene.OffOnDisplayOff ? "экран выключен" :
+                null;
 
-        _fixtureList.SelectedItem = _fixtureList.Items.Cast<FixtureItem>()
-                                                     .FirstOrDefault(i => i.Fixture == _view.Selected);
-        _syncing = false;
+            if (reason != null) _painter.Pause(reason);
+            else _painter.Resume(_scene.ResumeDelayMs);
+        };
     }
 
-    // ---- подключение и раскраска ------------------------------------------
+    void SetupTray()
+    {
+        _tray = new System.Windows.Forms.NotifyIcon
+        {
+            Icon = TrayIcon(),
+            Text = "CaseLight",
+            Visible = _scene.MinimizeToTray
+        };
+
+        var menu = new System.Windows.Forms.ContextMenuStrip();
+        menu.Items.Add("Показать", null, (_, _) => RestoreFromTray());
+        menu.Items.Add("Старт", null, (_, _) => StartPainting());
+        menu.Items.Add("Стоп", null, (_, _) => StopPainting());
+        menu.Items.Add(new System.Windows.Forms.ToolStripSeparator());
+        menu.Items.Add("Выход", null, (_, _) => Close());
+
+        _tray.ContextMenuStrip = menu;
+        _tray.DoubleClick += (_, _) => RestoreFromTray();
+    }
+
+    void RestoreFromTray()
+    {
+        Show();
+        WindowState = WindowState.Normal;
+        Activate();
+    }
+
+    static System.Drawing.Icon TrayIcon()
+    {
+        try
+        {
+            var s = Application.GetResourceStream(new Uri("pack://application:,,,/icon.ico"))?.Stream;
+            return s == null ? System.Drawing.SystemIcons.Application : new System.Drawing.Icon(s);
+        }
+        catch { return System.Drawing.SystemIcons.Application; }
+    }
+
+    void RefreshUi()
+    {
+        if (_painter.IsRunning) Say(_painter.Status);
+
+        if (_captureStats != null)
+        {
+            _captureStats.Text =
+                $"источник:   {_painter.SourceInfo}\n" +
+                $"состояние:  {_painter.Status}\n" +
+                $"кадров:     принято {_painter.FramesReceived}, отрисовано {_painter.FramesPainted}\n" +
+                $"частота:    {_painter.Fps:F1} к/с\n" +
+                $"возраст:    {_painter.LastFrameAgeMs} мс\n" +
+                $"диодов:     {_painter.LedCount}\n" +
+                $"OpenRGB:    {_hub.Status}";
+        }
+
+        if (_tray != null) _tray.Visible = _scene.MinimizeToTray;
+    }
+
+    void Say(string text) => _status.Text = text;
+
+    // ---- запуск -----------------------------------------------------------
 
     void ConnectHub()
     {
         _hub.Connect(force: true);
         Say(_hub.Status);
-        BuildProperties();
+        BuildFixturePanel();
     }
 
-    void Say(string text) => _status.Text = text;
-
-    /// <summary>Anything that changed the layout has to reach the canvas and the painter alike.</summary>
-    void Touch()
+    void StartPainting()
     {
-        _view.InvalidateVisual();
-        _painter?.Invalidate();
-    }
-
-    void TogglePainting()
-    {
-        if (_painter.IsRunning)
-        {
-            _painter.Stop();
-            _runButton.Content = "Пуск раскраски";
-            Say("Раскраска остановлена, подсветка погашена.");
-            return;
-        }
-
         if (!_hub.Connect(force: true)) { Say(_hub.Status); return; }
 
         _painter.UseScene(_scene);
         _painter.Start();
-        _runButton.Content = "Остановить";
-        Say("Раскраска запущена. Если кадров нет — включи в Ambilight «Отдавать снимки экрана в модуль подсветки».");
+        Say("Раскраска запущена.");
     }
 
-    // ---- фигуры -----------------------------------------------------------
-
-    void AddFixture()
+    void StopPainting()
     {
-        var f = new Fixture
+        StopTest();
+        _painter.Stop();
+        Say("Раскраска остановлена, подсветка погашена.");
+    }
+
+    // ---- геометрия окна ---------------------------------------------------
+
+    void RestoreWindowGeometry()
+    {
+        Width = Math.Max(1100, _scene.WindowWidth);
+        Height = Math.Max(700, _scene.WindowHeight);
+        MinWidth = 1100;
+        MinHeight = 700;
+
+        if (_scene.WindowLeft is double left && _scene.WindowTop is double top)
         {
-            Name = "Фигура " + (_scene.Fixtures.Count + 1),
-            CenterX = _scene.Monitor.CenterX + _scene.Monitor.Width / 2 + 200,
-            CenterY = _scene.Monitor.CenterY,
-            Width = 120,
-            Height = 120
-        };
-
-        // Bind to something real straight away when possible: an unbound fixture has no
-        // LED count, so it would draw as an empty rectangle and look broken.
-        var first = _hub.Devices.FirstOrDefault();
-        if (first != null && first.Zones.Length > 0)
-        {
-            f.Binding.DeviceName = first.Name;
-            f.Binding.DeviceLocation = first.Location;
-            f.Binding.ZoneIndex = 0;
-            f.Binding.FirstLed = 0;
-            f.Binding.LedCount = first.Zones[0].LedCount;
-        }
-
-        lock (_scene.Fixtures) _scene.Fixtures.Add(f);
-        _view.Select(f);
-        SyncFixtureList();
-        Touch();
-    }
-
-    void DuplicateFixture()
-    {
-        if (_view.Selected == null) return;
-
-        var copy = _view.Selected.Clone();
-        copy.Id = Guid.NewGuid().ToString("N")[..8];
-        copy.Name = _view.Selected.Name + " (копия)";
-        copy.CenterX += 60;
-        copy.CenterY += 60;
-
-        lock (_scene.Fixtures) _scene.Fixtures.Add(copy);
-        _view.Select(copy);
-        SyncFixtureList();
-        Touch();
-    }
-
-    void RemoveFixture()
-    {
-        if (_view.Selected == null) return;
-        lock (_scene.Fixtures) _scene.Fixtures.Remove(_view.Selected);
-        _view.Select(null);
-        SyncFixtureList();
-        Touch();
-    }
-
-    void HighlightSelected()
-    {
-        if (_view.Selected == null) { Say("Сначала выбери фигуру."); return; }
-        if (!_hub.Connect()) { Say(_hub.Status); return; }
-
-        if (_painter.IsRunning)
-        {
-            Say("Сначала останови раскраску — иначе она сразу перекрасит подсветку обратно.");
-            return;
-        }
-
-        _hub.Highlight(_view.Selected, 255, 255, 255);
-        Say($"Горит только «{_view.Selected.Name}» — так её видно в корпусе.");
-    }
-
-    // ---- панели -----------------------------------------------------------
-
-    void BuildProperties()
-    {
-        BuildSettings();
-        BuildFixturePanel();
-    }
-
-    /// <summary>Everything that is not about one particular fixture.</summary>
-    void BuildSettings()
-    {
-        _settings.Children.Clear();
-
-        _settings.Children.Add(Header("Монитор"));
-        _settings.Children.Add(Note("Размер видимой картинки. От него считается, какой участок экрана видит каждый диод."));
-        _settings.Children.Add(Num("Ширина, мм", _scene.Monitor.Width, v => { _scene.Monitor.Width = Math.Max(10, v); Touch(); }));
-        _settings.Children.Add(Num("Высота, мм", _scene.Monitor.Height, v => { _scene.Monitor.Height = Math.Max(10, v); Touch(); }));
-
-        _settings.Children.Add(Header("Раскраска"));
-        _settings.Children.Add(Num("Область выборки, мм", _scene.SampleRadiusMm, v => { _scene.SampleRadiusMm = Math.Max(1, v); Touch(); }));
-        _settings.Children.Add(Note("Сколько экрана усредняет один диод. Мало — дёргается на любом движении, много — всё сливается в один бурый цвет."));
-
-        _settings.Children.Add(Int("Кадров в секунду", _scene.MaxFps, v => _scene.MaxFps = Math.Clamp(v, 1, 120)));
-        _settings.Children.Add(Num("Яркость, 0..1", _scene.Brightness, v => _scene.Brightness = Math.Clamp(v, 0, 1)));
-        _settings.Children.Add(Num("Насыщенность", _scene.Saturation, v => _scene.Saturation = Math.Clamp(v, 0, 3)));
-        _settings.Children.Add(Num("Гамма", _scene.Gamma, v => _scene.Gamma = Math.Clamp(v, 0.1, 5)));
-        _settings.Children.Add(Num("Порог темноты", _scene.MinLuma, v => _scene.MinLuma = Math.Clamp(v, 0, 1)));
-        _settings.Children.Add(Note("Ниже этой яркости диод гаснет совсем, чтобы почти чёрный экран не оставлял корпус тускло подсвеченным."));
-
-        _settings.Children.Add(Num("Разгорается за", _scene.SmoothingRise, v => _scene.SmoothingRise = Math.Clamp(v, 0.01, 1)));
-        _settings.Children.Add(Num("Гаснет за", _scene.SmoothingFall, v => _scene.SmoothingFall = Math.Clamp(v, 0.01, 1)));
-        _settings.Children.Add(Note("Больше — быстрее. Свет привычнее выглядит, когда нарастает резко, а спадает плавно."));
-
-        _settings.Children.Add(Header("Программа"));
-        _settings.Children.Add(Check("Запускать вместе с Windows", Autostart.IsEnabled(), v => Say(Autostart.Set(v))));
-        _settings.Children.Add(Check("Сразу начинать раскраску", _scene.StartPaintingOnLaunch, v => _scene.StartPaintingOnLaunch = v));
-        _settings.Children.Add(Note("Подсветкой управляет OpenRGB, и ему нужны права администратора. Автозапуск CaseLight поможет только если и OpenRGB стартует сам."));
-    }
-
-    void BuildFixturePanel()
-    {
-        _properties.Children.Clear();
-
-        var f = _view.Selected;
-        if (f == null)
-        {
-            _properties.Children.Add(Header("Фигура"));
-            _properties.Children.Add(Note("Выбери фигуру на сцене или в списке слева."));
-            return;
-        }
-
-        _properties.Children.Add(Header("Фигура"));
-        _properties.Children.Add(Text("Название", f.Name, v => { f.Name = v; SyncFixtureList(); Touch(); }));
-        _properties.Children.Add(Check("Участвует в раскраске", f.Enabled, v => { f.Enabled = v; SyncFixtureList(); Touch(); }));
-
-        _properties.Children.Add(Int("Обновлять раз в N кадров", f.UpdateEvery, v => { f.UpdateEvery = Math.Max(1, v); Touch(); }));
-        _properties.Children.Add(Note("1 — каждый кадр. Оперативной памяти нужно больше: она сидит на медленной шине SMBus, " +
-                                      "и запись в неё каждый кадр задерживает всё остальное. 10–15 для памяти обычно достаточно."));
-
-        var actions = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 6, 0, 6) };
-        actions.Children.Add(SmallButton("Найти в корпусе", HighlightSelected));
-        _properties.Children.Add(actions);
-
-        // ---- привязка
-        _properties.Children.Add(Header("Привязка к железу"));
-
-        var deviceBox = new ComboBox { Margin = new Thickness(0, 2, 0, 8) };
-        foreach (var d in _hub.Devices) deviceBox.Items.Add(d.Name);
-        deviceBox.SelectedItem = _hub.Devices.FirstOrDefault(d => d.Name == f.Binding.DeviceName)?.Name;
-        deviceBox.SelectionChanged += (_, _) =>
-        {
-            if (deviceBox.SelectedItem is not string name) return;
-            var dev = _hub.Devices.First(d => d.Name == name);
-            f.Binding.DeviceName = dev.Name;
-            f.Binding.DeviceLocation = dev.Location;
-            f.Binding.ZoneIndex = 0;
-            f.Binding.FirstLed = 0;
-            f.Binding.LedCount = dev.Zones.FirstOrDefault()?.LedCount ?? 0;
-            BuildProperties();
-            Touch();
-        };
-        _properties.Children.Add(Labelled("Контроллер", deviceBox));
-
-        var info = _hub.Find(f.Binding);
-        if (info != null)
-        {
-            var zoneBox = new ComboBox { Margin = new Thickness(0, 2, 0, 8) };
-            foreach (var z in info.Zones) zoneBox.Items.Add($"[{z.Index}] {z.Name} — {z.LedCount}");
-            if (f.Binding.ZoneIndex < zoneBox.Items.Count) zoneBox.SelectedIndex = f.Binding.ZoneIndex;
-
-            zoneBox.SelectionChanged += (_, _) =>
+            // only honour a saved position that still lands on an attached monitor
+            double vw = SystemParameters.VirtualScreenWidth, vh = SystemParameters.VirtualScreenHeight;
+            if (left > -Width && left < vw && top > -Height && top < vh)
             {
-                if (zoneBox.SelectedIndex < 0) return;
-                f.Binding.ZoneIndex = zoneBox.SelectedIndex;
-                f.Binding.FirstLed = 0;
-                f.Binding.LedCount = info.Zones[zoneBox.SelectedIndex].LedCount;
-                BuildProperties();
-                Touch();
-            };
-            _properties.Children.Add(Labelled("Зона (разъём)", zoneBox));
+                WindowStartupLocation = WindowStartupLocation.Manual;
+                Left = left;
+                Top = top;
+            }
         }
         else
         {
-            _properties.Children.Add(Note($"Контроллер «{f.Binding.DeviceName}» сейчас не виден. " +
-                                          "Проверь, что OpenRGB запущен от администратора, и нажми «Переподключиться»."));
+            WindowStartupLocation = WindowStartupLocation.CenterScreen;
         }
 
-        _properties.Children.Add(Int("Первый диод зоны", f.Binding.FirstLed, v => { f.Binding.FirstLed = Math.Max(0, v); Touch(); }));
-        _properties.Children.Add(Int("Сколько диодов", f.Binding.LedCount, v => { f.Binding.LedCount = Math.Max(0, v); Touch(); }));
-        _properties.Children.Add(Note("Если на одном разъёме несколько разных вещей, их можно развести по фигурам, поделив диапазон."));
+        if (_scene.WindowMaximized) WindowState = WindowState.Maximized;
+    }
 
-        // ---- место
-        _properties.Children.Add(Header("Место в корпусе, мм"));
-        _properties.Children.Add(Num("Центр по горизонтали", f.CenterX, v => { f.CenterX = v; Touch(); }));
-        _properties.Children.Add(Num("Центр по вертикали", f.CenterY, v => { f.CenterY = v; Touch(); }));
-        _properties.Children.Add(Num("Ширина", f.Width, v => { f.Width = Math.Max(5, v); Touch(); }));
-        _properties.Children.Add(Num("Высота", f.Height, v => { f.Height = Math.Max(5, v); Touch(); }));
-        _properties.Children.Add(Num("Поворот, градусов", f.AngleDeg, v => { f.AngleDeg = v; Touch(); }));
+    void SaveWindowGeometry()
+    {
+        _scene.WindowMaximized = WindowState == WindowState.Maximized;
 
-        // ---- раскладка
-        _properties.Children.Add(Header("Как идут диоды"));
+        // RestoreBounds holds the pre-maximise rectangle; ActualWidth would save the
+        // maximised size and the window would never come back to its normal shape
+        var r = WindowState == WindowState.Normal
+            ? new Rect(Left, Top, ActualWidth, ActualHeight)
+            : RestoreBounds;
 
-        var kindBox = new ComboBox { Margin = new Thickness(0, 2, 0, 8) };
-        kindBox.Items.Add("Полоса — у ленты есть два конца");
-        kindBox.Items.Add("Замкнутое — кольцо или рамка");
-        kindBox.Items.Add("Точка — всё светится в одном месте");
-        kindBox.SelectedIndex = f.Arrangement switch
+        if (r.Width > 100 && r.Height > 100)
         {
-            Arrangement.Strip => 0,
-            Arrangement.Closed => 1,
-            _ => 2
-        };
-        kindBox.SelectionChanged += (_, _) =>
-        {
-            f.Arrangement = kindBox.SelectedIndex switch
-            {
-                0 => Arrangement.Strip,
-                1 => Arrangement.Closed,
-                _ => Arrangement.Point
-            };
-            BuildProperties();
-            Touch();
-        };
-        _properties.Children.Add(Labelled("Форма", kindBox));
-
-        if (f.Arrangement == Arrangement.Closed)
-        {
-            _properties.Children.Add(Check("Контур круглый", f.RoundContour, v => { f.RoundContour = v; BuildProperties(); Touch(); }));
-
-            if (!f.RoundContour)
-            {
-                _properties.Children.Add(Num("Пропорция рамки (высота ÷ ширина)", f.ContourAspect,
-                                             v => { f.ContourAspect = Math.Max(0.05, v); Touch(); }));
-                _properties.Children.Add(Note("Форма самой рамки, а не её места на сцене. У рамки тройной вертушки это примерно 3."));
-            }
-
-            _properties.Children.Add(Note("У замкнутого контура нет своего первого диода — его надо назначить. " +
-                                          "Для вертушки, стоящей ребром, это тот, что физически внизу."));
+            _scene.WindowWidth = r.Width;
+            _scene.WindowHeight = r.Height;
+            _scene.WindowLeft = r.Left;
+            _scene.WindowTop = r.Top;
         }
-
-        if (f.Arrangement != Arrangement.Point)
-        {
-            _properties.Children.Add(AnchorRow(f));
-            _properties.Children.Add(Check("Обход в другую сторону", f.Reverse, v => { f.Reverse = v; Touch(); }));
-        }
-
-        if (f.Arrangement == Arrangement.Closed)
-        {
-            _properties.Children.Add(Check("Стоит ребром ко мне", f.EdgeOn, v => { f.EdgeOn = v; BuildProperties(); Touch(); }));
-
-            if (f.EdgeOn)
-                _properties.Children.Add(Note("Кольцо видно с торца, поэтому оно сжимается в вертикальную линию: " +
-                                              "от начального диода высота растёт в обе стороны и сходится наверху. " +
-                                              "Ширина фигуры на цвет тогда не влияет."));
-        }
-    }
-
-    /// <summary>
-    /// The anchor with its own stepper and a button that lights just that LED - the only
-    /// reliable way to find which one is physically at the bottom is to look at it.
-    /// </summary>
-    UIElement AnchorRow(Fixture f)
-    {
-        var panel = new StackPanel { Margin = new Thickness(0, 6, 0, 6) };
-        panel.Children.Add(new TextBlock { Text = "Начальный диод", Foreground = Brushes.Silver, FontSize = 11 });
-
-        var row = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 4, 0, 0) };
-
-        var value = new TextBlock
-        {
-            Text = f.AnchorLed.ToString(),
-            Foreground = Brushes.White,
-            FontSize = 18,
-            Width = 46,
-            VerticalAlignment = VerticalAlignment.Center
-        };
-
-        void Move(int delta)
-        {
-            int n = Math.Max(1, f.LedCount);
-            f.AnchorLed = ((f.AnchorLed + delta) % n + n) % n;
-            value.Text = f.AnchorLed.ToString();
-            Touch();
-            ShowAnchor(f);
-        }
-
-        row.Children.Add(SmallButton("−", () => Move(-1)));
-        row.Children.Add(value);
-        row.Children.Add(SmallButton("+", () => Move(+1)));
-        row.Children.Add(SmallButton("показать", () => ShowAnchor(f)));
-
-        panel.Children.Add(row);
-        return panel;
-    }
-
-    void ShowAnchor(Fixture f)
-    {
-        if (_painter.IsRunning)
-        {
-            Say("Останови раскраску, иначе она сразу перекрасит подсветку обратно.");
-            return;
-        }
-
-        if (!_hub.Connect()) { Say(_hub.Status); return; }
-
-        _hub.HighlightLed(f, f.AnchorLed, 255, 60, 0);
-        Say($"Горит только диод {f.AnchorLed} — он считается началом.");
-    }
-
-    // ---- мелочи интерфейса ------------------------------------------------
-
-    static TextBlock Header(string text) => new()
-    {
-        Text = text,
-        Foreground = Brushes.White,
-        FontWeight = FontWeights.SemiBold,
-        FontSize = 14,
-        Margin = new Thickness(0, 12, 0, 6)
-    };
-
-    static TextBlock Note(string text) => new()
-    {
-        Text = text,
-        Foreground = new SolidColorBrush(Color.FromRgb(150, 158, 172)),
-        TextWrapping = TextWrapping.Wrap,
-        Margin = new Thickness(0, 4, 0, 8),
-        FontSize = 11
-    };
-
-    static UIElement Labelled(string label, UIElement editor)
-    {
-        var panel = new StackPanel { Margin = new Thickness(0, 4, 0, 4) };
-        panel.Children.Add(new TextBlock { Text = label, Foreground = Brushes.Silver, FontSize = 11 });
-        panel.Children.Add(editor);
-        return panel;
-    }
-
-    static UIElement Text(string label, string value, Action<string> set)
-    {
-        var box = new TextBox { Text = value, Margin = new Thickness(0, 2, 0, 0) };
-        box.TextChanged += (_, _) => set(box.Text);
-        return Labelled(label, box);
-    }
-
-    /// <summary>Accepts both a comma and a dot, because both get typed.</summary>
-    static UIElement Num(string label, double value, Action<double> set)
-    {
-        var box = new TextBox { Text = value.ToString("0.##", CultureInfo.InvariantCulture), Margin = new Thickness(0, 2, 0, 0) };
-        box.TextChanged += (_, _) =>
-        {
-            if (double.TryParse(box.Text.Replace(',', '.'), NumberStyles.Float, CultureInfo.InvariantCulture, out double v))
-                set(v);
-        };
-        return Labelled(label, box);
-    }
-
-    static UIElement Int(string label, int value, Action<int> set)
-    {
-        var box = new TextBox { Text = value.ToString(), Margin = new Thickness(0, 2, 0, 0) };
-        box.TextChanged += (_, _) => { if (int.TryParse(box.Text, out int v)) set(v); };
-        return Labelled(label, box);
-    }
-
-    static UIElement Check(string label, bool value, Action<bool> set)
-    {
-        var box = new CheckBox
-        {
-            Content = label,
-            IsChecked = value,
-            Foreground = Brushes.Silver,
-            Margin = new Thickness(0, 6, 0, 2)
-        };
-        box.Checked += (_, _) => set(true);
-        box.Unchecked += (_, _) => set(false);
-        return box;
-    }
-
-    static Button SmallButton(string caption, Action onClick)
-    {
-        var b = new Button { Content = caption, Padding = new Thickness(10, 4, 10, 4), Margin = new Thickness(0, 0, 6, 0) };
-        b.Click += (_, _) => onClick();
-        return b;
     }
 }

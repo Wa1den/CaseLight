@@ -1,10 +1,23 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
 namespace CaseLight.Model;
+
+/// <summary>Where the frames come from.</summary>
+public enum CaptureSource
+{
+    /// <summary>Ambilight publishes them on the shared bus; nothing is captured here.</summary>
+    FromAmbilight
+    // Собственный захват (DDA / WGC / GDI) появится здесь же - движок для него уже лежит
+    // в Ambilight.Core, не хватает только выбора и настроек.
+}
+
+/// <summary>Shape of the movable test patch used to check placement.</summary>
+public enum TestShape { Circle, Square }
 
 /// <summary>
 /// The monitor, placed on the same plane as the case.
@@ -22,19 +35,27 @@ public sealed class MonitorPlacement
     /// <summary>Visible picture, in millimetres. A 27" 16:9 panel is about 597 x 336.</summary>
     public double Width { get; set; } = 597;
     public double Height { get; set; } = 336;
+
+    public MonitorPlacement Clone() => (MonitorPlacement)MemberwiseClone();
 }
 
 /// <summary>
-/// Everything that lights up, laid out in millimetres on one plane seen from the front.
+/// Everything the application knows: the layout in millimetres and every setting.
 ///
-/// Millimetres rather than pixels or arbitrary units: the mapping from screen to case is
-/// a physical question - how far from the monitor a fan actually stands decides which part
-/// of the picture it should echo.
+/// One object, so "apply" and "cancel" have something whole to snapshot, and so export is
+/// a single file that restores the program exactly.
 /// </summary>
 public sealed class Scene
 {
+    // ---- раскладка --------------------------------------------------------
+
     public MonitorPlacement Monitor { get; set; } = new();
     public List<Fixture> Fixtures { get; set; } = new();
+
+    // ---- захват -----------------------------------------------------------
+
+    public CaptureSource CaptureSource { get; set; } = CaptureSource.FromAmbilight;
+    public int MaxFps { get; set; } = 30;
 
     // ---- раскраска --------------------------------------------------------
 
@@ -47,7 +68,33 @@ public sealed class Scene
     /// </summary>
     public double SampleRadiusMm { get; set; } = 60;
 
-    public int MaxFps { get; set; } = 30;
+    public double Brightness { get; set; } = 1.0;
+    public double Gamma { get; set; } = 2.2;
+    public double Saturation { get; set; } = 1.15;
+    public double MinLuma { get; set; }
+    public int TemperatureK { get; set; } = 6500;
+    public double GainR { get; set; } = 1.0;
+    public double GainG { get; set; } = 1.0;
+    public double GainB { get; set; } = 1.0;
+
+    /// <summary>Light rises quickly and falls gently, as in Ambilight.</summary>
+    public double SmoothingRise { get; set; } = 0.55;
+    public double SmoothingFall { get; set; } = 0.18;
+
+    // ---- тест размещения --------------------------------------------------
+
+    public TestShape TestShape { get; set; } = TestShape.Circle;
+
+    /// <summary>Diameter or side of the test patch, in millimetres of scene.</summary>
+    public double TestSizeMm { get; set; } = 150;
+
+    public string TestColor { get; set; } = "#FF4020";
+
+    // ---- основное ---------------------------------------------------------
+
+    public bool MinimizeToTray { get; set; } = true;
+    public bool StartMinimized { get; set; }
+    public bool WriteLog { get; set; } = true;
 
     /// <summary>
     /// Begin painting as soon as the window opens.
@@ -57,15 +104,34 @@ public sealed class Scene
     /// </summary>
     public bool StartPaintingOnLaunch { get; set; }
 
-    public double Brightness { get; set; } = 1.0;
-    public double Gamma { get; set; } = 2.2;
-    public double Saturation { get; set; } = 1.15;
-    public double MinLuma { get; set; }
-    public int TemperatureK { get; set; } = 6500;
+    // ---- питание ----------------------------------------------------------
 
-    /// <summary>Light rises quickly and falls gently, as in Ambilight.</summary>
-    public double SmoothingRise { get; set; } = 0.55;
-    public double SmoothingFall { get; set; } = 0.18;
+    public bool OffOnExit { get; set; } = true;
+    public bool OffOnDisplayOff { get; set; } = true;
+    public bool OffOnLock { get; set; } = true;
+    public bool OffOnSuspend { get; set; } = true;
+
+    /// <summary>
+    /// How long to wait after a wake before writing to the hardware again.
+    ///
+    /// Not politeness: OpenRGB was seen dying 41 seconds after a resume with an access
+    /// violation, because its USB devices are re-enumerated while it still holds the old
+    /// handles. Letting the bus settle first is the cheapest way not to be the one poking
+    /// it at that moment.
+    /// </summary>
+    public int ResumeDelayMs { get; set; } = 8000;
+
+    // ---- геометрия окна ---------------------------------------------------
+
+    public double WindowWidth { get; set; } = 1400;
+    public double WindowHeight { get; set; } = 900;
+
+    // nullable rather than NaN: System.Text.Json refuses to write NaN
+    public double? WindowLeft { get; set; }
+    public double? WindowTop { get; set; }
+    public bool WindowMaximized { get; set; }
+
+    // ---- хранение ---------------------------------------------------------
 
     static readonly JsonSerializerOptions Options = new()
     {
@@ -74,9 +140,14 @@ public sealed class Scene
     };
 
     [JsonIgnore]
-    public static string DefaultPath => Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-        "CaseLight", "scene.json");
+    public static string Folder => Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "CaseLight");
+
+    [JsonIgnore]
+    public static string DefaultPath => Path.Combine(Folder, "scene.json");
+
+    [JsonIgnore]
+    public static string LogPath => Path.Combine(Folder, "caselight.log");
 
     public void Save(string? path = null)
     {
@@ -100,4 +171,51 @@ public sealed class Scene
         }
         return new Scene();
     }
+
+    /// <summary>Throws on a bad file, so import can tell the user what went wrong.</summary>
+    public static Scene Import(string path) =>
+        JsonSerializer.Deserialize<Scene>(File.ReadAllText(path), Options)
+        ?? throw new InvalidOperationException("файл пуст или не содержит настроек");
+
+    // ---- применить и отменить ---------------------------------------------
+
+    /// <summary>Independent copy, used as the "last applied" snapshot behind Cancel.</summary>
+    public Scene Clone()
+    {
+        var copy = new Scene();
+        copy.CopyFrom(this);
+        return copy;
+    }
+
+    /// <summary>
+    /// Copies every value onto this instance, keeping the object identity the running
+    /// painter already holds.
+    ///
+    /// The fixture list is rebuilt from copies rather than shared: cancelling has to undo
+    /// dragging on the canvas too, and that only works if the snapshot owns its own
+    /// fixtures.
+    /// </summary>
+    public void CopyFrom(Scene other)
+    {
+        foreach (var prop in typeof(Scene).GetProperties())
+        {
+            if (!prop.CanRead || !prop.CanWrite) continue;
+            if (prop.Name is nameof(Fixtures) or nameof(Monitor)) continue;
+
+            prop.SetValue(this, prop.GetValue(other));
+        }
+
+        Monitor = other.Monitor.Clone();
+
+        var rebuilt = other.Fixtures.Select(f => f.Clone()).ToList();
+        lock (Fixtures)
+        {
+            Fixtures.Clear();
+            Fixtures.AddRange(rebuilt);
+        }
+    }
+
+    /// <summary>True when anything at all differs - what turns the apply bar on.</summary>
+    public bool DiffersFrom(Scene other) =>
+        JsonSerializer.Serialize(this, Options) != JsonSerializer.Serialize(other, Options);
 }

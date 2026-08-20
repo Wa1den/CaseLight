@@ -33,6 +33,16 @@ public sealed class RgbHub : IDisposable
     long _lastAttempt;
 
     /// <summary>
+    /// Set from the client's own thread when OpenRGB announces that its device list moved.
+    ///
+    /// This is what keeps us from writing an array of the wrong length: UpdateLeds carries
+    /// exactly as many colours as we last saw, and a zone resized on the server's side
+    /// would make that a buffer overrun over there - which is precisely how OpenRGB died
+    /// with 0xc0000409 in ucrtbase.
+    /// </summary>
+    volatile bool _listStale;
+
+    /// <summary>
     /// Bumped on every re-read of the controller list. Anything caching resolved indices
     /// has to notice: reconnecting renumbers devices, and stale indices would paint the
     /// wrong hardware rather than fail loudly.
@@ -56,6 +66,8 @@ public sealed class RgbHub : IDisposable
         {
             _client?.Dispose();
             _client = new OpenRgbClient(name: "CaseLight");
+            _client.DeviceListUpdated += (_, _) => _listStale = true;
+            _listStale = false;
             Refresh();
         }
         catch (Exception ex)
@@ -105,6 +117,20 @@ public sealed class RgbHub : IDisposable
             try { _client.SetCustomMode(info.Index); }
             catch { /* одно упрямое устройство не должно ронять остальные */ }
         }
+    }
+
+    /// <summary>
+    /// Re-reads the list if the server said it changed. Called from the paint loop between
+    /// frames, never in the middle of one, so buffers and lengths stay consistent.
+    /// </summary>
+    public bool RefreshIfStale()
+    {
+        if (!_listStale || _client == null) return false;
+
+        _listStale = false;
+        try { Refresh(); }
+        catch (Exception ex) { Status = "не удалось перечитать список устройств: " + ex.Message; }
+        return true;
     }
 
     /// <summary>
