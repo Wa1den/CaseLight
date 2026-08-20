@@ -11,9 +11,13 @@ namespace CaseLight.Model;
 public enum CaptureSource
 {
     /// <summary>Ambilight publishes them on the shared bus; nothing is captured here.</summary>
-    FromAmbilight
-    // Собственный захват (DDA / WGC / GDI) появится здесь же - движок для него уже лежит
-    // в Ambilight.Core, не хватает только выбора и настроек.
+    FromAmbilight,
+
+    /// <summary>Our own capture: DDA and WGC together, GDI covering the gaps.</summary>
+    Auto,
+    DdaOnly,
+    WgcOnly,
+    GdiOnly
 }
 
 /// <summary>Shape of the movable test patch used to check placement.</summary>
@@ -56,6 +60,9 @@ public sealed class Scene
 
     public CaptureSource CaptureSource { get; set; } = CaptureSource.FromAmbilight;
     public int MaxFps { get; set; } = 30;
+
+    /// <summary>Which screen to capture ourselves. Empty means the primary one.</summary>
+    public string MonitorDeviceName { get; set; } = "";
 
     // ---- раскраска --------------------------------------------------------
 
@@ -103,6 +110,21 @@ public sealed class Scene
     /// lighting up by itself and having to press a button after every reboot.
     /// </summary>
     public bool StartPaintingOnLaunch { get; set; }
+
+    // ---- сервер OpenRGB ---------------------------------------------------
+
+    /// <summary>Start the server ourselves when it is not up.</summary>
+    public bool AutoStartOpenRgb { get; set; } = true;
+
+    /// <summary>Empty means "find it yourself".</summary>
+    public string OpenRgbPath { get; set; } = "";
+
+    /// <summary>
+    /// Only worth it for the SMBus, which is to say for DRAM. Everything else - the
+    /// motherboard controller, the graphics card - is reachable without elevation, and
+    /// staying unelevated means no UAC prompt at every login.
+    /// </summary>
+    public bool OpenRgbAsAdmin { get; set; }
 
     // ---- питание ----------------------------------------------------------
 

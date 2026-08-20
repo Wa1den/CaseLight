@@ -46,6 +46,9 @@ public sealed partial class MainWindow : Window
     bool _rebuildingUi;
     bool _syncingList;
 
+    /// <summary>When we last launched the server, so the wait can be reported honestly.</summary>
+    long _serverStartedTicks;
+
     public MainWindow()
     {
         Title = "CaseLight — подсветка корпуса";
@@ -74,6 +77,7 @@ public sealed partial class MainWindow : Window
             _power.Attach(this);
             SetupTray();
 
+            EnsureServer();
             ConnectHub();
             RebuildTabs();
             SyncFixtureList();
@@ -270,6 +274,21 @@ public sealed partial class MainWindow : Window
         panel.Children.Add(Ui.Note("Подсветкой распоряжается OpenRGB, и ему нужны права администратора. " +
                                    "Автозапуск CaseLight поможет только если и OpenRGB стартует сам."));
 
+        panel.Children.Add(Ui.Header("Сервер OpenRGB"));
+        panel.Children.Add(Ui.Check("Запускать OpenRGB, если он не запущен", _scene.AutoStartOpenRgb, v => { _scene.AutoStartOpenRgb = v; Touch(); }));
+        panel.Children.Add(Ui.Check("Запускать от администратора", _scene.OpenRgbAsAdmin, v => { _scene.OpenRgbAsAdmin = v; Touch(); }));
+        panel.Children.Add(Ui.Note("Права нужны только ради оперативной памяти на шине SMBus. " +
+                                   "Плата и видеокарта доступны и без них, зато не будет запроса UAC при каждом входе."));
+
+        var pathBox = Ui.Text("Путь к OpenRGB.exe (пусто — найти самому)", _scene.OpenRgbPath, v => { _scene.OpenRgbPath = v; Touch(); });
+        panel.Children.Add(pathBox);
+        panel.Children.Add(Ui.Row(Ui.Btn("Найти", () =>
+        {
+            string? found = OpenRgbLauncher.FindExe();
+            Say(found == null ? "OpenRGB.exe не нашёлся — укажи путь вручную" : "нашёл: " + found);
+        }), Ui.Btn("Запустить сейчас", () => Say(OpenRgbLauncher.Launch(
+            string.IsNullOrWhiteSpace(_scene.OpenRgbPath) ? null : _scene.OpenRgbPath, _scene.OpenRgbAsAdmin)))));
+
         panel.Children.Add(Ui.Header("Настройки"));
         panel.Children.Add(Ui.Row(Ui.Btn("Экспорт…", ExportSettings), Ui.Btn("Импорт…", ImportSettings)));
         panel.Children.Add(Ui.Note("Один файл со всем: раскладка, монитор, цвета, захват, питание."));
@@ -323,12 +342,52 @@ public sealed partial class MainWindow : Window
 
         var box = new ComboBox { Margin = new Thickness(0, 2, 0, 0) };
         box.Items.Add("Получать от Ambilight");
-        box.SelectedIndex = 0;
-        box.IsEnabled = false;
+        box.Items.Add("Свой захват: автоматически");
+        box.Items.Add("Свой захват: только DDA");
+        box.Items.Add("Свой захват: только WGC");
+        box.Items.Add("Свой захват: только GDI");
+        box.SelectedIndex = (int)_scene.CaptureSource;
+        box.SelectionChanged += (_, _) =>
+        {
+            if (box.SelectedIndex < 0) return;
+            _scene.CaptureSource = (CaptureSource)box.SelectedIndex;
+            RebuildTabs();
+            Touch();
+        };
         panel.Children.Add(Ui.Labelled("Метод", box));
-        panel.Children.Add(Ui.Note("Пока доступен только приём кадров от Ambilight по разделяемой памяти. " +
-                                   "Собственный захват (DDA, WGC, GDI) появится здесь же — движок для него уже есть в общей библиотеке. " +
-                                   "Не забудь включить в Ambilight «Отдавать снимки экрана в модуль подсветки»."));
+
+        if (_scene.CaptureSource == CaptureSource.FromAmbilight)
+        {
+            panel.Children.Add(Ui.Note("Кадры приходят от Ambilight через разделяемую память — второго захвата экрана тогда нет вовсе. " +
+                                       "Не забудь включить там «Отдавать снимки экрана в модуль подсветки»."));
+        }
+        else
+        {
+            panel.Children.Add(Ui.Note("Свой захват не зависит от Ambilight, но если тот работает одновременно, экран будет " +
+                                       "сниматься дважды — это лишняя нагрузка на видеокарту."));
+
+            var monitorBox = new ComboBox { Margin = new Thickness(0, 2, 0, 0) };
+            var monitors = Native.EnumerateMonitors();
+
+            monitorBox.Items.Add("Основной экран");
+            foreach (var m in monitors)
+                monitorBox.Items.Add($"{m.DisplayName} — {m.Width}×{m.Height}");
+
+            int index = monitors.FindIndex(m => m.DeviceName == _scene.MonitorDeviceName);
+            monitorBox.SelectedIndex = index >= 0 ? index + 1 : 0;
+
+            monitorBox.SelectionChanged += (_, _) =>
+            {
+                int i = monitorBox.SelectedIndex;
+                _scene.MonitorDeviceName = i <= 0 ? "" : monitors[i - 1].DeviceName;
+                Touch();
+            };
+            panel.Children.Add(Ui.Labelled("Экран", monitorBox));
+
+            panel.Children.Add(Ui.Note("DDA быстрее всех, но её присутствие иногда заставляет Windows рисовать курсор через " +
+                                       "композицию — курсор начинает мерцать. WGC мягче, GDI работает всегда и всюду. " +
+                                       "«Автоматически» держит DDA и WGC вместе, а GDI закрывает провалы."));
+        }
 
         panel.Children.Add(Ui.Slide("Кадров в секунду", _scene.MaxFps, 1, 120, 1, v => { _scene.MaxFps = (int)v; Touch(); }));
         panel.Children.Add(Ui.Note("Верхний предел для быстрых устройств. Медленным можно задать свой делитель в параметрах фигуры."));
@@ -503,6 +562,22 @@ public sealed partial class MainWindow : Window
 
     void RefreshUi()
     {
+        // Reconnect on its own: after a launch the port appears only once detection is
+        // finished, and the server also dies by itself often enough that waiting for the
+        // user to press a button is not reasonable. Connect() throttles its own retries.
+        if (!_hub.IsConnected)
+        {
+            if (_hub.Connect())
+            {
+                Say(_hub.Status);
+                BuildFixturePanel();
+            }
+            else if (_serverStartedTicks > 0 && Environment.TickCount64 - _serverStartedTicks < OpenRgbLauncher.TypicalStartupMs)
+            {
+                Say("OpenRGB запускается и ищет устройства…");
+            }
+        }
+
         if (_painter.IsRunning) Say(_painter.Status);
 
         if (_captureStats != null)
@@ -526,14 +601,34 @@ public sealed partial class MainWindow : Window
 
     void ConnectHub()
     {
+        EnsureServer();
         _hub.Connect(force: true);
         Say(_hub.Status);
         BuildFixturePanel();
     }
 
+    /// <summary>
+    /// Starts the server if it is not up. Does not wait for it: detection takes several
+    /// seconds and the port only opens afterwards, so the reconnect in the UI tick picks it
+    /// up when it is genuinely ready rather than freezing the window meanwhile.
+    /// </summary>
+    void EnsureServer()
+    {
+        if (!_scene.AutoStartOpenRgb || OpenRgbLauncher.IsRunning()) return;
+
+        string path = string.IsNullOrWhiteSpace(_scene.OpenRgbPath) ? "" : _scene.OpenRgbPath;
+        Say(OpenRgbLauncher.Launch(path.Length == 0 ? null : path, _scene.OpenRgbAsAdmin));
+        _serverStartedTicks = Environment.TickCount64;
+    }
+
     void StartPainting()
     {
-        if (!_hub.Connect(force: true)) { Say(_hub.Status); return; }
+        EnsureServer();
+
+        // Deliberately not a forced reconnect: OpenRGB dies on the client disconnect - all
+        // three crashes in the log end on "Closing server connection" - so an existing
+        // connection is worth far more than a fresh one.
+        if (!_hub.Connect()) { Say(_hub.Status); return; }
 
         _painter.UseScene(_scene);
         _painter.Start();

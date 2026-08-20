@@ -192,7 +192,7 @@ public sealed partial class MainWindow
         else
         {
             _fixturePanel.Children.Add(Ui.Note($"Контроллер «{f.Binding.DeviceName}» сейчас не виден. " +
-                                               "Проверь, что OpenRGB запущен от администратора, и нажми «Переподключиться»."));
+                                               "Он либо отключён в OpenRGB, либо сервер ещё не поднялся. Фигура при этом просто не участвует в раскраске."));
         }
 
         _fixturePanel.Children.Add(Ui.Int("Первый диод зоны", f.Binding.FirstLed, v => { f.Binding.FirstLed = Math.Max(0, v); Touch(); }));
@@ -442,7 +442,8 @@ public sealed partial class MainWindow
 
     void StartTest()
     {
-        if (!_hub.Connect(force: true)) { Say(_hub.Status); return; }
+        EnsureServer();
+        if (!_hub.Connect()) { Say(_hub.Status); return; }
 
         // Everything goes dark first: whatever the case was showing a moment ago would
         // otherwise linger and be mistaken for the test's own output.

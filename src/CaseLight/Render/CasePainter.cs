@@ -3,6 +3,8 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Windows;
+using Ambilight.Capture;
+using Ambilight.Capture.Backends;
 using Ambilight.Frames;
 using Ambilight.Leds;
 using CaseLight.Model;
@@ -32,9 +34,18 @@ public sealed class CasePainter : IDisposable
     /// <summary>One LED, already resolved to hardware so the loop does no searching.</summary>
     readonly record struct Target(int DeviceIndex, int GlobalLed);
 
+    /// <summary>Per-LED sampling needs enough pixels that each zone covers several.</summary>
+    const int ReduceWidth = 256;
+
     readonly RgbHub _hub;
     readonly FrameSubscriber _bus = new();
     readonly ColorPipeline _pipeline = new();
+
+    /// <summary>Our own capture, used when the frames do not come from Ambilight.</summary>
+    HybridBackend? _capture;
+    long _captureVersion;
+    CaptureSource _captureMode = CaptureSource.FromAmbilight;
+    string _captureMonitor = "";
 
     Thread? _thread;
     volatile bool _running;
@@ -126,6 +137,7 @@ public sealed class CasePainter : IDisposable
         _thread?.Join(1500);
         _thread = null;
 
+        StopCapture();
         _hub.Blackout();
         Status = "остановлено";
     }
@@ -226,7 +238,12 @@ public sealed class CasePainter : IDisposable
                 FillFromTest(test);
                 SourceInfo = "тестовое пятно";
             }
-            else if (!TakeScreenFrame(periodMs))
+            else if (_scene.CaptureSource == CaptureSource.FromAmbilight)
+            {
+                StopCapture();
+                if (!TakeSharedFrame(periodMs)) continue;
+            }
+            else if (!TakeOwnFrame(periodMs))
             {
                 continue;
             }
@@ -283,8 +300,90 @@ public sealed class CasePainter : IDisposable
         }
     }
 
+    /// <summary>
+    /// Captures the screen ourselves, through the same backends Ambilight uses.
+    ///
+    /// Worth having even though the shared bus exists: it makes the program stand on its
+    /// own, and it is the only option when Ambilight is not wanted at all - the case
+    /// lighting has no reason to depend on the strip behind the monitor.
+    /// </summary>
+    bool TakeOwnFrame(int periodMs)
+    {
+        if (!EnsureCapture())
+        {
+            Status = "не нашёл экран для захвата";
+            SourceInfo = "нет источника";
+            Thread.Sleep(500);
+            return false;
+        }
+
+        _capture!.MinReduceIntervalMs = periodMs;
+
+        if (!_capture.TryGetImage(ref _image, ref _captureVersion, out int w, out int h, out int stride) || w <= 0 || h <= 0)
+        {
+            // A still screen produces no frames at all; keep what the LEDs already show.
+            Thread.Sleep(periodMs);
+            return false;
+        }
+
+        FramesReceived++;
+        LastFrameAgeMs = 0;
+        SourceInfo = $"свой захват ({_scene.CaptureSource}), {w}×{h}, экран {_captureMonitor}";
+
+        ZoneSampler.Sample(_image, w, h, stride, _zones, _sampled);
+        return true;
+    }
+
+    /// <summary>Creates or re-creates the backend when the method or the screen changes.</summary>
+    bool EnsureCapture()
+    {
+        bool same = _capture != null
+                 && _captureMode == _scene.CaptureSource
+                 && _captureMonitor == _scene.MonitorDeviceName;
+
+        if (same) return true;
+
+        StopCapture();
+
+        var monitors = Native.EnumerateMonitors();
+        var monitor = monitors.FirstOrDefault(m => m.DeviceName == _scene.MonitorDeviceName)
+                   ?? monitors.FirstOrDefault(m => m.IsPrimary)
+                   ?? monitors.FirstOrDefault();
+
+        if (monitor == null) return false;
+
+        var mode = _scene.CaptureSource;
+        _capture = new HybridBackend
+        {
+            ReduceWidth = ReduceWidth,
+            MinReduceIntervalMs = 1000.0 / Math.Clamp(_scene.MaxFps, 1, 120),
+            UseDda = mode is CaptureSource.Auto or CaptureSource.DdaOnly,
+            UseWgc = mode is CaptureSource.Auto or CaptureSource.WgcOnly,
+            UseGdi = mode is CaptureSource.Auto or CaptureSource.GdiOnly
+        };
+
+        _capture.Start(monitor);
+        _captureVersion = 0;
+
+        _captureMode = mode;
+        _captureMonitor = _scene.MonitorDeviceName;
+
+        ProbeLog.Log("захват", $"свой захват {mode}, экран {monitor.DeviceName} {monitor.Width}x{monitor.Height}");
+        return true;
+    }
+
+    void StopCapture()
+    {
+        if (_capture == null) return;
+
+        _capture.Stop();
+        _capture.Dispose();
+        _capture = null;
+        _captureMode = CaptureSource.FromAmbilight;
+    }
+
     /// <summary>Pulls one frame off the bus; false means there is nothing to paint this tick.</summary>
-    bool TakeScreenFrame(int periodMs)
+    bool TakeSharedFrame(int periodMs)
     {
         if (!_bus.TryAttach())
         {
@@ -425,6 +524,7 @@ public sealed class CasePainter : IDisposable
     public void Dispose()
     {
         Stop();
+        StopCapture();
         _bus.Dispose();
     }
 }
