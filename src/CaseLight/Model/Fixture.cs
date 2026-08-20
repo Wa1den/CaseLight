@@ -113,6 +113,22 @@ public sealed class Fixture
     /// <summary>Purely cosmetic, so fixtures can be told apart on the canvas.</summary>
     public string Tint { get; set; } = "#4C8DFF";
 
+    // ---- участие в раскраске ----------------------------------------------
+
+    /// <summary>Off keeps the fixture on the scene but stops it being painted.</summary>
+    public bool Enabled { get; set; } = true;
+
+    /// <summary>
+    /// Paint this fixture only every N-th frame.
+    ///
+    /// For DRAM this is the difference between working and not. The modules hang off the
+    /// SMBus, which is far slower than the USB the motherboard uses, and writing to them
+    /// every frame holds up everything else - the visible result is the whole case lagging
+    /// behind the screen. Updating memory a few times a second costs nothing visually and
+    /// gives the fast devices their full rate back.
+    /// </summary>
+    public int UpdateEvery { get; set; } = 1;
+
     public Fixture Clone()
     {
         var copy = (Fixture)MemberwiseClone();

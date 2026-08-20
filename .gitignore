@@ -1,6 +1,7 @@
 # build output
 bin/
 obj/
+dist/
 
 # runtime artefacts
 *.log

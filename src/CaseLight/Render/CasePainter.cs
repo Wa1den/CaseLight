@@ -1,7 +1,7 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading;
-using System.Windows;
 using Ambilight.Frames;
 using Ambilight.Leds;
 using CaseLight.Model;
@@ -20,6 +20,9 @@ namespace CaseLight.Render;
 /// </summary>
 public sealed class CasePainter : IDisposable
 {
+    /// <summary>One LED, already resolved to hardware so the loop does no searching.</summary>
+    readonly record struct Target(int DeviceIndex, int GlobalLed);
+
     readonly RgbHub _hub;
     readonly FrameSubscriber _bus = new();
     readonly ColorPipeline _pipeline = new();
@@ -32,7 +35,14 @@ public sealed class CasePainter : IDisposable
 
     // одна запись на диод, в том же порядке, что и зоны выборки
     LedZone[] _zones = Array.Empty<LedZone>();
-    (Binding binding, int led)[] _targets = Array.Empty<(Binding, int)>();
+    Target[] _targets = Array.Empty<Target>();
+
+    /// <summary>How often each device is written, in frames. Slow buses get a larger number.</summary>
+    readonly Dictionary<int, int> _deviceDivider = new();
+    readonly HashSet<int> _dueNow = new();
+
+    int _resolvedGeneration = -1;
+    long _frameNo;
 
     byte[] _image = Array.Empty<byte>();
     byte[] _sampled = Array.Empty<byte>();
@@ -88,6 +98,18 @@ public sealed class CasePainter : IDisposable
 
     void Loop()
     {
+        try { PaintLoop(); }
+        catch (Exception ex)
+        {
+            // A background thread that throws takes the whole process with it. Losing the
+            // painting is bad; losing an unsaved layout with it is worse.
+            _running = false;
+            Status = "раскраска аварийно остановлена: " + ex.Message;
+        }
+    }
+
+    void PaintLoop()
+    {
         var clock = System.Diagnostics.Stopwatch.StartNew();
         double lastMs = 0;
         int framesThisSecond = 0;
@@ -97,7 +119,13 @@ public sealed class CasePainter : IDisposable
         {
             int periodMs = (int)Math.Round(1000.0 / Math.Clamp(_scene.MaxFps, 1, 120));
 
-            if (_rebuild) { _rebuild = false; Rebuild(); }
+            // A reconnect renumbers the controllers, so resolved indices have to be redone
+            // before they address the wrong hardware.
+            if (_rebuild || _hub.Generation != _resolvedGeneration)
+            {
+                _rebuild = false;
+                Rebuild();
+            }
 
             if (!_bus.TryAttach())
             {
@@ -116,7 +144,7 @@ public sealed class CasePainter : IDisposable
 
             if (_targets.Length == 0)
             {
-                Status = "не к чему привязываться: нет фигур с диодами";
+                Status = "не к чему привязываться: нет включённых фигур с диодами";
                 Thread.Sleep(300);
                 continue;
             }
@@ -136,14 +164,26 @@ public sealed class CasePainter : IDisposable
 
             _pipeline.Process(_sampled, _output, ColourSettings(), _zones.Length, dt <= 0 ? periodMs : dt);
 
+            _frameNo++;
+
+            _dueNow.Clear();
+            foreach (var (device, divider) in _deviceDivider)
+                if (divider <= 1 || _frameNo % divider == 0)
+                    _dueNow.Add(device);
+
+            if (_dueNow.Count == 0) { Thread.Sleep(periodMs); continue; }
+
             _hub.BeginFrame();
             for (int i = 0; i < _targets.Length; i++)
             {
+                var t = _targets[i];
+                if (!_dueNow.Contains(t.DeviceIndex)) continue;
+
                 int o = i * 3;
-                _hub.Contribute(_targets[i].binding, _targets[i].led, _output[o], _output[o + 1], _output[o + 2]);
+                _hub.ContributeAt(t.DeviceIndex, t.GlobalLed, _output[o], _output[o + 1], _output[o + 2]);
             }
 
-            if (!_hub.EndFrame())
+            if (!_hub.EndFrame(_dueNow))
             {
                 // The OpenRGB server dies on its own often enough that this is an expected
                 // state; reconnecting re-resolves every binding and restores direct mode.
@@ -161,7 +201,7 @@ public sealed class CasePainter : IDisposable
                 Fps = framesThisSecond * 1000.0 / (tick - fpsWindow);
                 framesThisSecond = 0;
                 fpsWindow = tick;
-                Status = $"идёт раскраска, {Fps:F0} к/с, кадр {info.Width}x{info.Height} от «{info.MonitorDeviceName}»";
+                Status = $"идёт раскраска, {Fps:F0} к/с, кадр {info.Width}×{info.Height}";
             }
 
             Thread.Sleep(periodMs);
@@ -181,7 +221,7 @@ public sealed class CasePainter : IDisposable
     };
 
     /// <summary>
-    /// Works out which patch of screen each LED watches.
+    /// Works out which patch of screen each LED watches, and resolves it to hardware.
     ///
     /// An LED standing beside the monitor is outside the picture entirely, so its patch is
     /// clamped to the nearest edge - which is exactly what "a continuation of the screen"
@@ -190,7 +230,9 @@ public sealed class CasePainter : IDisposable
     void Rebuild()
     {
         var zones = new List<LedZone>();
-        var targets = new List<(Binding, int)>();
+        var targets = new List<Target>();
+
+        _deviceDivider.Clear();
 
         var m = _scene.Monitor;
         double left = m.CenterX - m.Width / 2;
@@ -200,12 +242,27 @@ public sealed class CasePainter : IDisposable
         double ru = _scene.SampleRadiusMm / w;
         double rv = _scene.SampleRadiusMm / h;
 
-        foreach (var f in _scene.Fixtures)
+        // Snapshot under the same lock the UI takes: adding or removing a fixture while
+        // this loop walks the list would throw right out of the paint thread.
+        Fixture[] fixtures;
+        lock (_scene.Fixtures) fixtures = _scene.Fixtures.ToArray();
+
+        foreach (var f in fixtures)
         {
-            if (f.Binding.LedCount <= 0) continue;
+            if (!f.Enabled || f.Binding.LedCount <= 0) continue;
+            if (!_hub.TryResolve(f.Binding, out int device, out int firstGlobal, out int available)) continue;
+
+            // A device shared by several fixtures runs at the fastest rate any of them asks
+            // for; painting only part of a device would leave the rest of it black.
+            int divider = Math.Max(1, f.UpdateEvery);
+            _deviceDivider[device] = _deviceDivider.TryGetValue(device, out int existing)
+                ? Math.Min(existing, divider)
+                : divider;
 
             var world = LedGeometry.World(f);
-            for (int i = 0; i < world.Length; i++)
+            int count = Math.Min(available, world.Length);
+
+            for (int i = 0; i < count; i++)
             {
                 double u = (world[i].X - left) / w;
                 double v = (world[i].Y - top) / h;
@@ -217,7 +274,7 @@ public sealed class CasePainter : IDisposable
                 zones.Add(new LedZone(Math.Clamp(u - ru, 0, 1), Math.Clamp(v - rv, 0, 1),
                                       Math.Clamp(u + ru, 0, 1), Math.Clamp(v + rv, 0, 1),
                                       Side.Bottom));
-                targets.Add((f.Binding, i));
+                targets.Add(new Target(device, firstGlobal + i));
             }
         }
 
@@ -226,6 +283,7 @@ public sealed class CasePainter : IDisposable
         _sampled = new byte[_zones.Length * 3];
         _output = new byte[_zones.Length * 3];
         _pipeline.Reset(_zones.Length);
+        _resolvedGeneration = _hub.Generation;
     }
 
     public void Dispose()

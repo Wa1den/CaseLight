@@ -49,6 +49,14 @@ public sealed class Scene
 
     public int MaxFps { get; set; } = 30;
 
+    /// <summary>
+    /// Begin painting as soon as the window opens.
+    ///
+    /// Pointless on its own, but with autostart it is the difference between the case
+    /// lighting up by itself and having to press a button after every reboot.
+    /// </summary>
+    public bool StartPaintingOnLaunch { get; set; }
+
     public double Brightness { get; set; } = 1.0;
     public double Gamma { get; set; } = 2.2;
     public double Saturation { get; set; } = 1.15;

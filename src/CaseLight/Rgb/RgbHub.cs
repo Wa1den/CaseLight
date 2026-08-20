@@ -32,6 +32,13 @@ public sealed class RgbHub : IDisposable
 
     long _lastAttempt;
 
+    /// <summary>
+    /// Bumped on every re-read of the controller list. Anything caching resolved indices
+    /// has to notice: reconnecting renumbers devices, and stale indices would paint the
+    /// wrong hardware rather than fail loudly.
+    /// </summary>
+    public int Generation { get; private set; }
+
     public bool IsConnected => _client != null;
     public string Status { get; private set; } = "не подключено";
     public DeviceInfo[] Devices { get; private set; } = Array.Empty<DeviceInfo>();
@@ -89,6 +96,7 @@ public sealed class RgbHub : IDisposable
         }
 
         Devices = list.ToArray();
+        Generation++;
 
         // Per-LED control has to be re-established after every reconnect: a restarted
         // server brings its devices back in whatever mode they defaulted to.
@@ -112,6 +120,38 @@ public sealed class RgbHub : IDisposable
         if (byName.Length == 1 || string.IsNullOrEmpty(binding.DeviceLocation)) return byName[0];
 
         return byName.FirstOrDefault(d => d.Location == binding.DeviceLocation) ?? byName[0];
+    }
+
+    /// <summary>
+    /// Resolves a binding once, so the paint loop can address LEDs by plain index instead
+    /// of searching the device list for every LED of every frame.
+    /// </summary>
+    public bool TryResolve(Binding binding, out int deviceIndex, out int firstGlobalLed, out int available)
+    {
+        deviceIndex = -1; firstGlobalLed = 0; available = 0;
+
+        var info = Find(binding);
+        if (info == null) return false;
+        if (binding.ZoneIndex < 0 || binding.ZoneIndex >= info.Zones.Length) return false;
+
+        var zone = info.Zones[binding.ZoneIndex];
+
+        deviceIndex = info.Index;
+        firstGlobalLed = zone.FirstGlobalLed + binding.FirstLed;
+        available = Math.Max(0, Math.Min(binding.LedCount, zone.LedCount - binding.FirstLed));
+        return available > 0;
+    }
+
+    /// <summary>Contributes to an already-resolved LED. Same averaging as <see cref="Contribute"/>.</summary>
+    public void ContributeAt(int deviceIndex, int globalLed, byte r, byte g, byte b)
+    {
+        if (!_frame.TryGetValue(deviceIndex, out var buf)) return;
+        if (globalLed < 0 || globalLed >= buf.r.Length) return;
+
+        buf.r[globalLed] += r;
+        buf.g[globalLed] += g;
+        buf.b[globalLed] += b;
+        buf.hits[globalLed]++;
     }
 
     // ---- кадр -------------------------------------------------------------
@@ -156,8 +196,14 @@ public sealed class RgbHub : IDisposable
         buf.hits[global]++;
     }
 
-    /// <summary>Sends every device one full array; unlit LEDs go out black.</summary>
-    public bool EndFrame()
+    /// <summary>
+    /// Sends each device one full array; unlit LEDs go out black.
+    ///
+    /// <paramref name="onlyDevices"/> limits the write to those devices, which is how slow
+    /// hardware is kept from holding up the rest: memory on the SMBus can be written a few
+    /// times a second while the motherboard keeps its full rate.
+    /// </summary>
+    public bool EndFrame(IReadOnlyCollection<int>? onlyDevices = null)
     {
         if (_client == null) return false;
 
@@ -165,6 +211,7 @@ public sealed class RgbHub : IDisposable
         {
             foreach (var info in Devices)
             {
+                if (onlyDevices != null && !onlyDevices.Contains(info.Index)) continue;
                 if (!_frame.TryGetValue(info.Index, out var buf)) continue;
 
                 var colors = new Color[info.LedCount];

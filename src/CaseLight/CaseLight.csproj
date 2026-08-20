@@ -12,9 +12,12 @@
     <PlatformTarget>x64</PlatformTarget>
     <RootNamespace>CaseLight</RootNamespace>
     <AssemblyName>CaseLight</AssemblyName>
+    <ApplicationIcon>icon.ico</ApplicationIcon>
   </PropertyGroup>
 
   <ItemGroup>
+    <!-- Also embedded, so the window itself can show it, not just the exe in Explorer. -->
+    <Resource Include="icon.ico" />
     <PackageReference Include="OpenRGB.NET" Version="3.1.1" />
 
     <!-- Frame bus, colour pipeline and the capture backends, shared with Ambilight.
