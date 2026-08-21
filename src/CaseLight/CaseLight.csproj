@@ -15,6 +15,11 @@
     <RootNamespace>CaseLight</RootNamespace>
     <AssemblyName>CaseLight</AssemblyName>
     <ApplicationIcon>icon.ico</ApplicationIcon>
+
+    <Version>0.9.0</Version>
+    <Product>CaseLight</Product>
+    <Authors>Wa1den</Authors>
+    <Description>Подсветка корпуса как продолжение экрана, через OpenRGB</Description>
   </PropertyGroup>
 
   <ItemGroup>
@@ -22,10 +27,10 @@
     <Resource Include="icon.ico" />
     <PackageReference Include="OpenRGB.NET" Version="3.1.1" />
 
-    <!-- Frame bus, colour pipeline and the capture backends, shared with Ambilight.
-         Referenced by relative path: the two projects are separate repositories that
-         happen to sit side by side under Arduino\. -->
-    <ProjectReference Include="..\..\..\Ambilight\src\Ambilight.Core\Ambilight.Core.csproj" />
+    <!-- Capture, colour pipeline, frame bus and power handling. Lives inside this
+         repository on purpose: the case lighting has to work on a machine that has no
+         monitor strip and no external controller, so it cannot depend on Rimlight. -->
+    <ProjectReference Include="..\CaseLight.Core\CaseLight.Core.csproj" />
   </ItemGroup>
 
 </Project>

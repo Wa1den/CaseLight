@@ -4,8 +4,8 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
 using System.Windows.Threading;
-using Ambilight.Capture;
-using Ambilight.Power;
+using CaseLight.Core.Capture;
+using CaseLight.Core.Power;
 using CaseLight.Model;
 using CaseLight.Render;
 using CaseLight.Rgb;
@@ -70,6 +70,7 @@ public sealed partial class MainWindow : Window
         Background = Ui.Bg;
 
         ProbeLog.Configure(Scene.LogPath, _scene.WriteLog);
+        CaseLight.Core.Text.Loc.Configure(System.IO.Path.Combine(Scene.Folder, "lang"));
 
         try { Icon = new System.Windows.Media.Imaging.BitmapImage(new Uri("pack://application:,,,/icon.ico")); }
         catch { /* без иконки окно всё равно работает */ }
@@ -450,10 +451,37 @@ public sealed partial class MainWindow : Window
 
     void BuildAboutTab() => AddTab("О программе", panel =>
     {
-        panel.Children.Add(Ui.Header("CaseLight"));
-        panel.Children.Add(Ui.Note("Подсветка корпуса как продолжение экрана."));
-        panel.Children.Add(Ui.Note("Кадры приходят от Ambilight, вывод идёт через OpenRGB."));
+        panel.Children.Add(Ui.Header("CaseLight " + AppVersion));
+
+        panel.Children.Add(Ui.Note("Подсветка корпуса, повторяющая то, что происходит на экране. " +
+                                   "Каждое светящееся место описывается там, где оно физически стоит, " +
+                                   "и берёт цвет с ближайшего к нему участка картинки — системник рядом " +
+                                   "с монитором читается как его продолжение."));
+
+        panel.Children.Add(Ui.Note("Управление железом идёт через OpenRGB: материнская плата, ленты и " +
+                                   "вентиляторы на её разъёмах, видеокарта, оперативная память. " +
+                                   "Программа сама поднимает сервер, если он не запущен, и возвращает " +
+                                   "подсветку к жизни после сна."));
+
+        panel.Children.Add(Ui.Note("Кадры можно брать двумя способами: захватывать экран самостоятельно " +
+                                   "или получать от Rimlight, подсветки монитора. Rimlight при этом " +
+                                   "не обязателен — он нужен только тем, у кого есть лента за монитором " +
+                                   "и отдельный контроллер к ней."));
+
+        panel.Children.Add(Ui.Link("Репозиторий:", "https://github.com/Wa1den/CaseLight"));
+        panel.Children.Add(Ui.Link("Rimlight, подсветка монитора:", "https://github.com/Wa1den/Rimlight"));
+        panel.Children.Add(Ui.Link("OpenRGB:", "https://openrgb.org"));
     });
+
+    /// <summary>Version from the assembly, so it can only be changed in one place.</summary>
+    static string AppVersion
+    {
+        get
+        {
+            var v = System.Reflection.Assembly.GetExecutingAssembly().GetName().Version;
+            return v == null ? "" : $"{v.Major}.{v.Minor}.{v.Build}";
+        }
+    }
 
     // ---- применить и отменить ---------------------------------------------
 

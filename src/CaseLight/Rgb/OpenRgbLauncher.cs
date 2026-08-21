@@ -3,7 +3,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using Microsoft.Win32;
-using Ambilight.Capture;
+using CaseLight.Core.Capture;
 
 namespace CaseLight.Rgb;
 

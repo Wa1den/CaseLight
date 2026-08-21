@@ -1,7 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using Ambilight.Capture;
+using CaseLight.Core.Capture;
 using CaseLight.Model;
 using OpenRGB.NET;
 

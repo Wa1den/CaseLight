@@ -3,10 +3,10 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Windows;
-using Ambilight.Capture;
-using Ambilight.Capture.Backends;
-using Ambilight.Frames;
-using Ambilight.Leds;
+using CaseLight.Core.Capture;
+using CaseLight.Core.Capture.Backends;
+using CaseLight.Core.Frames;
+using CaseLight.Core.Leds;
 using CaseLight.Model;
 using CaseLight.Rgb;
 

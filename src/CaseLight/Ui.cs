@@ -134,6 +134,45 @@ public static class Ui
         return b;
     }
 
+    /// <summary>A caption followed by a clickable address.</summary>
+    public static TextBlock Link(string caption, string url)
+    {
+        var t = new TextBlock
+        {
+            Foreground = FgDim,
+            FontSize = 11,
+            TextWrapping = TextWrapping.Wrap,
+            Margin = new Thickness(0, 6, 0, 0)
+        };
+
+        if (!string.IsNullOrEmpty(caption)) t.Inlines.Add(caption + " ");
+
+        var link = new System.Windows.Documents.Hyperlink(
+            new System.Windows.Documents.Run(url)) { Foreground = Fg };
+        link.Click += (_, _) => OpenUrl(url);
+        t.Inlines.Add(link);
+
+        return t;
+    }
+
+    static void OpenUrl(string url)
+    {
+        try
+        {
+            // UseShellExecute hands it to the default browser; without it .NET tries to
+            // execute the address as a program
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+            {
+                FileName = url,
+                UseShellExecute = true
+            });
+        }
+        catch (Exception ex)
+        {
+            CaseLight.Core.Capture.ProbeLog.Log("ссылка", "не удалось открыть " + url + ": " + ex.Message);
+        }
+    }
+
     public static StackPanel Row(params UIElement[] items)
     {
         var panel = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 6, 0, 6) };
