@@ -28,6 +28,17 @@ public sealed class RgbHub : IDisposable
     OpenRgbClient? _client;
     Device[] _devices = Array.Empty<Device>();
 
+    /// <summary>
+    /// One socket, one writer at a time.
+    ///
+    /// The client library is not thread-safe, and two threads genuinely reach it here: the
+    /// paint loop writing frames, and the interface re-reading the device list or switching
+    /// modes. Interleaved writes put half of one packet inside another, and the server on
+    /// the far end parses whatever comes out - which is a very plausible reading of the
+    /// buffer overrun it died with.
+    /// </summary>
+    readonly object _io = new();
+
     /// <summary>Accumulated colour per device per LED, plus how many fixtures contributed.</summary>
     readonly Dictionary<int, (double[] r, double[] g, double[] b, int[] hits)> _frame = new();
 
@@ -51,6 +62,16 @@ public sealed class RgbHub : IDisposable
     public int Generation { get; private set; }
 
     public bool IsConnected => _client != null;
+
+    /// <summary>
+    /// Connected AND actually holding a device list.
+    ///
+    /// The two are not the same thing, and the difference cost a whole evening: the server
+    /// opens its port before it has finished looking for hardware, so a client that
+    /// connects at that moment gets an empty list and, if nobody asks again, keeps it
+    /// forever. Readiness means devices, not a socket.
+    /// </summary>
+    public bool IsReady => _client != null && Devices.Length > 0;
     public string Status { get; private set; } = "не подключено";
     public DeviceInfo[] Devices { get; private set; } = Array.Empty<DeviceInfo>();
 
@@ -65,11 +86,14 @@ public sealed class RgbHub : IDisposable
 
         try
         {
-            _client?.Dispose();
-            _client = new OpenRgbClient(name: "CaseLight");
-            _client.DeviceListUpdated += (_, _) => _listStale = true;
-            _listStale = false;
-            Refresh();
+            lock (_io)
+            {
+                _client?.Dispose();
+                _client = new OpenRgbClient(name: "CaseLight");
+                _client.DeviceListUpdated += (_, _) => _listStale = true;
+                _listStale = false;
+                Refresh();
+            }
         }
         catch (Exception ex)
         {
@@ -86,6 +110,15 @@ public sealed class RgbHub : IDisposable
 
     /// <summary>Re-reads the controller list; call after anything that could renumber it.</summary>
     public void Refresh()
+    {
+        lock (_io)
+        {
+            if (_client == null) return;
+            RefreshLocked();
+        }
+    }
+
+    void RefreshLocked()
     {
         if (_client == null) return;
 
@@ -270,32 +303,42 @@ public sealed class RgbHub : IDisposable
     /// </summary>
     public bool EndFrame(IReadOnlyCollection<int>? onlyDevices = null)
     {
-        if (_client == null) return false;
-
         try
         {
-            foreach (var info in Devices)
+            lock (_io)
             {
-                if (onlyDevices != null && !onlyDevices.Contains(info.Index)) continue;
-                if (!_frame.TryGetValue(info.Index, out var buf)) continue;
+                // re-checked inside the lock: recovery disposes the client from its own thread
+                if (_client == null) return false;
 
-                var colors = new Color[info.LedCount];
-                for (int i = 0; i < info.LedCount; i++)
+                foreach (var info in Devices)
                 {
-                    int hits = buf.hits[i];
-                    colors[i] = hits == 0
-                        ? new Color(0, 0, 0)
-                        : new Color((byte)(buf.r[i] / hits), (byte)(buf.g[i] / hits), (byte)(buf.b[i] / hits));
-                }
+                    if (onlyDevices != null && !onlyDevices.Contains(info.Index)) continue;
+                    if (!_frame.TryGetValue(info.Index, out var buf)) continue;
 
-                _client.UpdateLeds(info.Index, colors);
+                    // the list can be re-read between frames, leaving our buffer a size behind
+                    if (buf.r.Length != info.LedCount) continue;
+
+                    var colors = new Color[info.LedCount];
+                    for (int i = 0; i < info.LedCount; i++)
+                    {
+                        int hits = buf.hits[i];
+                        colors[i] = hits == 0
+                            ? new Color(0, 0, 0)
+                            : new Color((byte)(buf.r[i] / hits), (byte)(buf.g[i] / hits), (byte)(buf.b[i] / hits));
+                    }
+
+                    _client.UpdateLeds(info.Index, colors);
+                }
             }
         }
         catch (Exception ex)
         {
             Status = "связь потеряна: " + ex.Message;
-            _client?.Dispose();
-            _client = null;
+            lock (_io)
+            {
+                try { _client?.Dispose(); } catch { /* уже мёртв */ }
+                _client = null;
+            }
             return false;
         }
 
@@ -328,7 +371,15 @@ public sealed class RgbHub : IDisposable
 
     public void Dispose()
     {
-        try { _client?.Dispose(); } catch { /* уже отвалилось */ }
-        _client = null;
+        lock (_io)
+        {
+            try { _client?.Dispose(); } catch { /* уже отвалилось */ }
+            _client = null;
+        }
+
+        // stale names in the interface are worse than an honest empty list
+        _devices = Array.Empty<Device>();
+        Devices = Array.Empty<DeviceInfo>();
+        Generation++;
     }
 }

@@ -52,6 +52,9 @@ public sealed partial class MainWindow : Window
     /// <summary>Guards against running the wake recovery twice for one wake.</summary>
     bool _wokeUp;
 
+    /// <summary>Throttles re-reading the list while the server is still detecting.</summary>
+    long _lastEmptyRefresh;
+
     /// <summary>
     /// Recovery owns the hub while it runs.
     ///
@@ -616,14 +619,7 @@ public sealed partial class MainWindow : Window
                     _scene.OpenRgbAsAdmin);
             }
 
-            // wait for it to answer again - a refused connection is harmless, unlike a
-            // dropped one, so retrying like this costs nothing
-            bool back = false;
-            for (int i = 0; i < 60 && !back; i++)
-            {
-                back = _hub.Connect(force: true);
-                if (!back) System.Threading.Thread.Sleep(500);
-            }
+            bool back = WaitForDevices();
 
             Dispatcher.Invoke(() =>
             {
@@ -681,16 +677,23 @@ public sealed partial class MainWindow : Window
         // Reconnect on its own: after a launch the port appears only once detection is
         // finished, and the server also dies by itself often enough that waiting for the
         // user to press a button is not reasonable. Connect() throttles its own retries.
-        if (!_hub.IsConnected && !_recovering)
+        if (!_hub.IsReady && !_recovering)
         {
-            if (_hub.Connect())
+            if (!_hub.IsConnected)
             {
-                Say(_hub.Status);
-                BuildFixturePanel();
+                if (_hub.Connect()) { Say(_hub.Status); BuildFixturePanel(); }
+                else if (_serverStartedTicks > 0 && Environment.TickCount64 - _serverStartedTicks < OpenRgbLauncher.TypicalStartupMs)
+                    Say("OpenRGB запускается и ищет устройства…");
             }
-            else if (_serverStartedTicks > 0 && Environment.TickCount64 - _serverStartedTicks < OpenRgbLauncher.TypicalStartupMs)
+            else if (Environment.TickCount64 - _lastEmptyRefresh > 2000)
             {
-                Say("OpenRGB запускается и ищет устройства…");
+                // Connected but empty: detection is still running on the other side. Ask
+                // again instead of reconnecting - remaking the connection is what crashes it.
+                _lastEmptyRefresh = Environment.TickCount64;
+                _hub.Refresh();
+
+                if (_hub.IsReady) { Say(_hub.Status); BuildFixturePanel(); }
+                else Say("OpenRGB подключен, но устройств пока нет — ищет…");
             }
         }
 
@@ -753,6 +756,27 @@ public sealed partial class MainWindow : Window
         Say("Раскраска запущена.");
     }
 
+    /// <summary>
+    /// Waits until the server both answers and has found something.
+    ///
+    /// A refused connection is harmless - unlike a dropped one, which is what kills this
+    /// server - so retrying costs nothing. Once connected, the list is re-read rather than
+    /// the connection remade, because detection finishes after the port opens and an empty
+    /// list at that moment means "not yet", not "nothing here".
+    /// </summary>
+    bool WaitForDevices(int attempts = 90)
+    {
+        for (int i = 0; i < attempts; i++)
+        {
+            if (!_hub.IsConnected) _hub.Connect(force: true);
+            else _hub.Refresh();
+
+            if (_hub.IsReady) return true;
+            System.Threading.Thread.Sleep(500);
+        }
+        return false;
+    }
+
     /// <summary>The same recovery, on demand - useful when sleep is not the cause.</summary>
     void RestartServerNow()
     {
@@ -768,12 +792,7 @@ public sealed partial class MainWindow : Window
                 string.IsNullOrWhiteSpace(_scene.OpenRgbPath) ? null : _scene.OpenRgbPath,
                 _scene.OpenRgbAsAdmin);
 
-            bool back = false;
-            for (int i = 0; i < 60 && !back; i++)
-            {
-                back = _hub.Connect(force: true);
-                if (!back) System.Threading.Thread.Sleep(500);
-            }
+            bool back = WaitForDevices();
 
             Dispatcher.Invoke(() =>
             {
