@@ -10,14 +10,45 @@ namespace CaseLight.Model;
 /// <summary>Where the frames come from.</summary>
 public enum CaptureSource
 {
-    /// <summary>Ambilight publishes them on the shared bus; nothing is captured here.</summary>
-    FromAmbilight,
+    /// <summary>Rimlight publishes them on the shared bus; nothing is captured here.</summary>
+    FromRimlight,
 
     /// <summary>Our own capture: DDA and WGC together, GDI covering the gaps.</summary>
     Auto,
     DdaOnly,
     WgcOnly,
     GdiOnly
+}
+
+/// <summary>
+/// Reads the source by name, answering to the name it used to have.
+///
+/// The shared project was renamed from Ambilight to Rimlight, and settings written before
+/// that say "FromAmbilight". A name the enum does not know makes deserialisation throw, and
+/// <see cref="Scene.Load"/> answers a broken file with an empty scene - so without this the
+/// rename alone would quietly cost the user their whole layout on the next launch.
+///
+/// An unknown name falls back to the default rather than throwing, for the same reason.
+/// </summary>
+sealed class CaptureSourceConverter : JsonConverter<CaptureSource>
+{
+    public override CaptureSource Read(ref Utf8JsonReader reader, Type type, JsonSerializerOptions options)
+    {
+        if (reader.TokenType == JsonTokenType.Number)
+            return (CaptureSource)reader.GetInt32();
+
+        string name = reader.GetString() ?? "";
+
+        if (name.Equals("FromAmbilight", StringComparison.OrdinalIgnoreCase))
+            return CaptureSource.FromRimlight;
+
+        return Enum.TryParse(name, ignoreCase: true, out CaptureSource value)
+            ? value
+            : CaptureSource.FromRimlight;
+    }
+
+    public override void Write(Utf8JsonWriter writer, CaptureSource value, JsonSerializerOptions options) =>
+        writer.WriteStringValue(value.ToString());
 }
 
 /// <summary>
@@ -77,7 +108,7 @@ public sealed class Scene
 
     // ---- захват -----------------------------------------------------------
 
-    public CaptureSource CaptureSource { get; set; } = CaptureSource.FromAmbilight;
+    public CaptureSource CaptureSource { get; set; } = CaptureSource.FromRimlight;
     public int MaxFps { get; set; } = 30;
 
     /// <summary>Which screen to capture ourselves. Empty means the primary one.</summary>
@@ -103,7 +134,7 @@ public sealed class Scene
     public double GainG { get; set; } = 1.0;
     public double GainB { get; set; } = 1.0;
 
-    /// <summary>Light rises quickly and falls gently, as in Ambilight.</summary>
+    /// <summary>Light rises quickly and falls gently, as in Rimlight.</summary>
     public double SmoothingRise { get; set; } = 0.55;
     public double SmoothingFall { get; set; } = 0.18;
 
@@ -180,7 +211,11 @@ public sealed class Scene
     static readonly JsonSerializerOptions Options = new()
     {
         WriteIndented = true,
-        Converters = { new JsonStringEnumConverter() }
+
+        // Order matters: the list is walked front to back and the first converter that
+        // accepts the type wins. JsonStringEnumConverter claims every enum, so the one
+        // that knows the old name has to stand ahead of it.
+        Converters = { new CaptureSourceConverter(), new JsonStringEnumConverter() }
     };
 
     [JsonIgnore]

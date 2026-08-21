@@ -23,7 +23,7 @@ public sealed class TestPatch
 /// <summary>
 /// Drives the case from the screen.
 ///
-/// The chain is deliberately the same one Ambilight already uses for the strip behind the
+/// The chain is deliberately the same one Rimlight already uses for the strip behind the
 /// monitor - the frame arrives over the shared bus, <see cref="ZoneSampler"/> averages a
 /// patch per LED and <see cref="ColorPipeline"/> does the colour work in linear light. The
 /// only part specific to the case is deciding which patch of screen each LED looks at, and
@@ -41,10 +41,10 @@ public sealed class CasePainter : IDisposable
     readonly FrameSubscriber _bus = new();
     readonly ColorPipeline _pipeline = new();
 
-    /// <summary>Our own capture, used when the frames do not come from Ambilight.</summary>
+    /// <summary>Our own capture, used when the frames do not come from Rimlight.</summary>
     HybridBackend? _capture;
     long _captureVersion;
-    CaptureSource _captureMode = CaptureSource.FromAmbilight;
+    CaptureSource _captureMode = CaptureSource.FromRimlight;
     string _captureMonitor = "";
 
     Thread? _thread;
@@ -238,7 +238,7 @@ public sealed class CasePainter : IDisposable
                 FillFromTest(test);
                 SourceInfo = "тестовое пятно";
             }
-            else if (_scene.CaptureSource == CaptureSource.FromAmbilight)
+            else if (_scene.CaptureSource == CaptureSource.FromRimlight)
             {
                 StopCapture();
                 if (!TakeSharedFrame(periodMs)) continue;
@@ -301,10 +301,10 @@ public sealed class CasePainter : IDisposable
     }
 
     /// <summary>
-    /// Captures the screen ourselves, through the same backends Ambilight uses.
+    /// Captures the screen ourselves, through the same backends Rimlight uses.
     ///
     /// Worth having even though the shared bus exists: it makes the program stand on its
-    /// own, and it is the only option when Ambilight is not wanted at all - the case
+    /// own, and it is the only option when Rimlight is not wanted at all - the case
     /// lighting has no reason to depend on the strip behind the monitor.
     /// </summary>
     bool TakeOwnFrame(int periodMs)
@@ -379,7 +379,7 @@ public sealed class CasePainter : IDisposable
         _capture.Stop();
         _capture.Dispose();
         _capture = null;
-        _captureMode = CaptureSource.FromAmbilight;
+        _captureMode = CaptureSource.FromRimlight;
     }
 
     /// <summary>Pulls one frame off the bus; false means there is nothing to paint this tick.</summary>
@@ -403,7 +403,7 @@ public sealed class CasePainter : IDisposable
 
         FramesReceived++;
         LastFrameAgeMs = info.AgeMs;
-        SourceInfo = $"Ambilight, {info.Width}×{info.Height}, экран {info.MonitorDeviceName}";
+        SourceInfo = $"Rimlight, {info.Width}×{info.Height}, экран {info.MonitorDeviceName}";
 
         ZoneSampler.Sample(_image, info.Width, info.Height, info.Stride, _zones, _sampled);
         return true;
