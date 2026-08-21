@@ -357,7 +357,7 @@ public sealed partial class MainWindow : Window
         panel.Children.Add(Ui.Header("Источник кадров"));
 
         var box = new ComboBox { Margin = new Thickness(0, 2, 0, 0) };
-        box.Items.Add("Получать от Ambilight");
+        box.Items.Add("Получать от Rimlight");
         box.Items.Add("Свой захват: автоматически");
         box.Items.Add("Свой захват: только DDA");
         box.Items.Add("Свой захват: только WGC");
@@ -372,14 +372,14 @@ public sealed partial class MainWindow : Window
         };
         panel.Children.Add(Ui.Labelled("Метод", box));
 
-        if (_scene.CaptureSource == CaptureSource.FromAmbilight)
+        if (_scene.CaptureSource == CaptureSource.FromRimlight)
         {
-            panel.Children.Add(Ui.Note("Кадры приходят от Ambilight через разделяемую память — второго захвата экрана тогда нет вовсе. " +
+            panel.Children.Add(Ui.Note("Кадры приходят от Rimlight через разделяемую память — второго захвата экрана тогда нет вовсе. " +
                                        "Не забудь включить там «Отдавать снимки экрана в модуль подсветки»."));
         }
         else
         {
-            panel.Children.Add(Ui.Note("Свой захват не зависит от Ambilight, но если тот работает одновременно, экран будет " +
+            panel.Children.Add(Ui.Note("Свой захват не зависит от Rimlight, но если тот работает одновременно, экран будет " +
                                        "сниматься дважды — это лишняя нагрузка на видеокарту."));
 
             var monitorBox = new ComboBox { Margin = new Thickness(0, 2, 0, 0) };
