@@ -8,6 +8,8 @@ graphics card, the memory modules.
 
 Windows, x64, .NET 9.
 
+![The CaseLight window: settings on the left, the plan with fixtures around the monitor rectangle on the right](pics/interface.jpg)
+
 ## Placement model
 
 The case stands next to the monitor, so the image can be continued past the edge of the
@@ -59,6 +61,10 @@ dotnet publish src/CaseLight/CaseLight.csproj -c Release -r win-x64 --self-conta
    vertical line.
 6. Check the layout with the placement test: a patch is moved across the canvas in place of
    the screen frame.
+
+For a check against a real frame, `pics/Rainbow.jpg` is an image with saturated colours in
+every part of the frame. Set as the desktop background, it shows the whole layout at once:
+every device should light up in the colour of the screen area next to it.
 
 The number of LEDs on an ARGB header is not detected automatically, the header does not
 report it, and OpenRGB substitutes a value of 60. Several fans may also be chained onto a
