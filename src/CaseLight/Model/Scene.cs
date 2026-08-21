@@ -20,6 +20,25 @@ public enum CaptureSource
     GdiOnly
 }
 
+/// <summary>
+/// What to do with the server after the machine wakes up.
+///
+/// Sleep re-enumerates the USB controllers, and a server that stayed running keeps writing
+/// into handles that lead nowhere: it reports success while the case sits in the pattern it
+/// shows during boot. Something has to shake it.
+/// </summary>
+public enum WakeRecovery
+{
+    /// <summary>Just resume - fine if the lighting survives sleep on this machine.</summary>
+    Nothing,
+
+    /// <summary>Ask the server to look for hardware again. Gentler, but it can crash it.</summary>
+    Rescan,
+
+    /// <summary>Close the server and start it fresh. Blunt and reliable.</summary>
+    RestartServer
+}
+
 /// <summary>Shape of the movable test patch used to check placement.</summary>
 public enum TestShape { Circle, Square }
 
@@ -142,6 +161,9 @@ public sealed class Scene
     /// it at that moment.
     /// </summary>
     public int ResumeDelayMs { get; set; } = 8000;
+
+    /// <summary>Default is the blunt one, because it is the one that actually works.</summary>
+    public WakeRecovery WakeRecovery { get; set; } = WakeRecovery.RestartServer;
 
     // ---- геометрия окна ---------------------------------------------------
 

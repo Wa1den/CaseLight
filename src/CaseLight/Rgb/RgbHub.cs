@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using Ambilight.Capture;
 using CaseLight.Model;
 using OpenRGB.NET;
 
@@ -116,6 +117,44 @@ public sealed class RgbHub : IDisposable
         {
             try { _client.SetCustomMode(info.Index); }
             catch { /* одно упрямое устройство не должно ронять остальные */ }
+        }
+    }
+
+    /// <summary>
+    /// Asks the server to look for hardware again, over a socket of our own.
+    ///
+    /// The client library has no such call, but the protocol does: a bare 16-byte header
+    /// with packet id 140. Worth trying before the blunt instrument of a restart - though
+    /// OpenRGB is known to fall over during a rescan, so the caller should stop painting
+    /// first and be ready for the connection to die.
+    /// </summary>
+    public static string RequestRescan(string host = "127.0.0.1", int port = 6742)
+    {
+        try
+        {
+            using var socket = new System.Net.Sockets.TcpClient();
+            socket.Connect(host, port);
+
+            using var stream = socket.GetStream();
+
+            var packet = new byte[16];
+            packet[0] = (byte)'O'; packet[1] = (byte)'R'; packet[2] = (byte)'G'; packet[3] = (byte)'B';
+            // device index 0, size 0 - both already zero
+            BitConverter.GetBytes(140u).CopyTo(packet, 8);   // REQUEST_RESCAN_DEVICES
+
+            stream.Write(packet, 0, packet.Length);
+            stream.Flush();
+
+            // give the server a moment to pick the request up before the socket closes
+            System.Threading.Thread.Sleep(300);
+
+            ProbeLog.Log("OpenRGB", "запрошено пересканирование устройств");
+            return "запрошено пересканирование устройств";
+        }
+        catch (Exception ex)
+        {
+            ProbeLog.Log("OpenRGB", "пересканирование не удалось: " + ex.Message);
+            return "пересканирование не удалось: " + ex.Message;
         }
     }
 

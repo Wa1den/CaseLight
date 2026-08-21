@@ -77,6 +77,52 @@ public static class OpenRgbLauncher
         return null;
     }
 
+    /// <summary>
+    /// Closes the server: politely first, by force if it will not go.
+    ///
+    /// Politely matters - OpenRGB writes its zone sizes on exit, and killing it outright
+    /// eventually loses the strip lengths that were measured by hand.
+    /// </summary>
+    public static string Stop(int graceMs = 4000)
+    {
+        var processes = Process.GetProcessesByName("OpenRGB");
+        if (processes.Length == 0) return "OpenRGB не запущен";
+
+        foreach (var p in processes)
+        {
+            try
+            {
+                if (p.MainWindowHandle != IntPtr.Zero) p.CloseMainWindow();
+                if (!p.WaitForExit(graceMs)) p.Kill(entireProcessTree: true);
+                p.WaitForExit(2000);
+            }
+            catch (Exception ex)
+            {
+                ProbeLog.Log("OpenRGB", "не удалось закрыть: " + ex.Message);
+            }
+            finally { p.Dispose(); }
+        }
+
+        ProbeLog.Log("OpenRGB", "остановлен");
+        return "OpenRGB остановлен";
+    }
+
+    /// <summary>
+    /// Full restart. Blunt, but it is the only thing that reliably brings the lighting back
+    /// after sleep: the controllers are re-enumerated while the machine is out, and the
+    /// running server keeps writing into handles that no longer lead anywhere - which is
+    /// why it reports success while the case sits in its power-on pattern.
+    /// </summary>
+    public static string Restart(string? exePath, bool asAdmin)
+    {
+        Stop();
+
+        // let Windows finish releasing the USB handles before the new instance claims them
+        System.Threading.Thread.Sleep(1500);
+
+        return Launch(exePath, asAdmin);
+    }
+
     /// <returns>What happened, ready for the status line.</returns>
     public static string Launch(string? exePath, bool asAdmin)
     {

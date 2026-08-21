@@ -49,6 +49,18 @@ public sealed partial class MainWindow : Window
     /// <summary>When we last launched the server, so the wait can be reported honestly.</summary>
     long _serverStartedTicks;
 
+    /// <summary>Guards against running the wake recovery twice for one wake.</summary>
+    bool _wokeUp;
+
+    /// <summary>
+    /// Recovery owns the hub while it runs.
+    ///
+    /// It disposes the client and restarts the server from a background thread, and the UI
+    /// tick reconnects on its own every half second - without this flag the two would be
+    /// taking the same connection apart and putting it back together at once.
+    /// </summary>
+    volatile bool _recovering;
+
     public MainWindow()
     {
         Title = "CaseLight — подсветка корпуса";
@@ -406,6 +418,26 @@ public sealed partial class MainWindow : Window
         panel.Children.Add(Ui.Check("при уходе в сон", _scene.OffOnSuspend, v => { _scene.OffOnSuspend = v; Touch(); }));
 
         panel.Children.Add(Ui.Header("После пробуждения"));
+
+        var wakeBox = new ComboBox { Margin = new Thickness(0, 2, 0, 8) };
+        wakeBox.Items.Add("Ничего не делать");
+        wakeBox.Items.Add("Попросить OpenRGB пересканировать устройства");
+        wakeBox.Items.Add("Перезапустить OpenRGB");
+        wakeBox.SelectedIndex = (int)_scene.WakeRecovery;
+        wakeBox.SelectionChanged += (_, _) =>
+        {
+            if (wakeBox.SelectedIndex < 0) return;
+            _scene.WakeRecovery = (WakeRecovery)wakeBox.SelectedIndex;
+            Touch();
+        };
+        panel.Children.Add(Ui.Labelled("Что делать", wakeBox));
+        panel.Children.Add(Ui.Note("Во сне контроллеры переподключаются заново, а работавший сервер продолжает писать в " +
+                                   "устаревшие хендлы: он рапортует успех, а корпус светится так же, как при загрузке. " +
+                                   "Перезапуск грубее, но именно он надёжно возвращает управление. Пересканирование мягче, " +
+                                   "однако способно уронить сервер."));
+
+        panel.Children.Add(Ui.Row(Ui.Btn("Перезапустить OpenRGB сейчас", RestartServerNow)));
+
         panel.Children.Add(Ui.Slide("Пауза перед возвратом", _scene.ResumeDelayMs / 1000.0, 0, 30, 1,
                                     v => { _scene.ResumeDelayMs = (int)(v * 1000); Touch(); }, " с"));
         panel.Children.Add(Ui.Note("Во сне устройства переподключаются заново, и OpenRGB какое-то время держит устаревшие хендлы — " +
@@ -518,9 +550,93 @@ public sealed partial class MainWindow : Window
                 state.DisplayOff && _scene.OffOnDisplayOff ? "экран выключен" :
                 null;
 
-            if (reason != null) _painter.Pause(reason);
-            else _painter.Resume(_scene.ResumeDelayMs);
+            if (state.Suspended) _wokeUp = false;
+
+            if (reason != null)
+            {
+                _painter.Pause(reason);
+                return;
+            }
+
+            // Only a real wake needs the server shaken; unlocking the session does not.
+            if (state is { Suspended: false } && _power.LastResumeTicks > 0 && !_wokeUp)
+            {
+                _wokeUp = true;
+                RecoverAfterWake();
+                return;
+            }
+
+            _painter.Resume(_scene.ResumeDelayMs);
         };
+    }
+
+    /// <summary>
+    /// Brings the lighting back after sleep.
+    ///
+    /// Resuming alone is not enough: the controllers were re-enumerated while the machine
+    /// slept, and the server that stayed up keeps writing into handles that lead nowhere -
+    /// it reports success while the case shows its power-on pattern. Restarting the server
+    /// is blunt but it is what actually works; the gentler rescan is offered because it
+    /// sometimes suffices, though it is known to take the server down with it.
+    /// </summary>
+    void RecoverAfterWake()
+    {
+        var mode = _scene.WakeRecovery;
+
+        if (mode == WakeRecovery.Nothing)
+        {
+            _painter.Resume(_scene.ResumeDelayMs);
+            return;
+        }
+
+        bool wasPainting = _painter.IsRunning;
+        _recovering = true;
+
+        // Stop writing before touching the server: a rescan with an active client is what
+        // crashed it by hand, and a restart would be writing into a dying process.
+        _painter.Pause("восстановление после сна");
+        Say("Пробуждение: привожу OpenRGB в чувство…");
+
+        System.Threading.Tasks.Task.Run(() =>
+        {
+            // let the USB stack finish re-enumerating before anything is asked of it
+            System.Threading.Thread.Sleep(Math.Max(2000, _scene.ResumeDelayMs));
+
+            string what;
+            if (mode == WakeRecovery.Rescan)
+            {
+                what = RgbHub.RequestRescan();
+                System.Threading.Thread.Sleep(6000);   // поиск устройств занимает секунды
+            }
+            else
+            {
+                _hub.Dispose();                        // клиента всё равно унесёт вместе с сервером
+                what = OpenRgbLauncher.Restart(
+                    string.IsNullOrWhiteSpace(_scene.OpenRgbPath) ? null : _scene.OpenRgbPath,
+                    _scene.OpenRgbAsAdmin);
+            }
+
+            // wait for it to answer again - a refused connection is harmless, unlike a
+            // dropped one, so retrying like this costs nothing
+            bool back = false;
+            for (int i = 0; i < 60 && !back; i++)
+            {
+                back = _hub.Connect(force: true);
+                if (!back) System.Threading.Thread.Sleep(500);
+            }
+
+            Dispatcher.Invoke(() =>
+            {
+                Say(back
+                    ? $"{what}; подсветка восстановлена"
+                    : $"{what}; сервер не отвечает — нажми «Переподключиться»");
+
+                BuildFixturePanel();
+
+                _painter.Resume(0);
+                if (wasPainting && !_painter.IsRunning) _painter.Start();
+            });
+        });
     }
 
     void SetupTray()
@@ -565,7 +681,7 @@ public sealed partial class MainWindow : Window
         // Reconnect on its own: after a launch the port appears only once detection is
         // finished, and the server also dies by itself often enough that waiting for the
         // user to press a button is not reasonable. Connect() throttles its own retries.
-        if (!_hub.IsConnected)
+        if (!_hub.IsConnected && !_recovering)
         {
             if (_hub.Connect())
             {
@@ -601,6 +717,8 @@ public sealed partial class MainWindow : Window
 
     void ConnectHub()
     {
+        if (_recovering) { Say("Идёт восстановление связи, подожди…"); return; }
+
         EnsureServer();
         _hub.Connect(force: true);
         Say(_hub.Status);
@@ -633,6 +751,40 @@ public sealed partial class MainWindow : Window
         _painter.UseScene(_scene);
         _painter.Start();
         Say("Раскраска запущена.");
+    }
+
+    /// <summary>The same recovery, on demand - useful when sleep is not the cause.</summary>
+    void RestartServerNow()
+    {
+        bool wasPainting = _painter.IsRunning;
+        _recovering = true;
+        _painter.Pause("перезапуск OpenRGB");
+        Say("Перезапускаю OpenRGB…");
+
+        System.Threading.Tasks.Task.Run(() =>
+        {
+            _hub.Dispose();
+            string what = OpenRgbLauncher.Restart(
+                string.IsNullOrWhiteSpace(_scene.OpenRgbPath) ? null : _scene.OpenRgbPath,
+                _scene.OpenRgbAsAdmin);
+
+            bool back = false;
+            for (int i = 0; i < 60 && !back; i++)
+            {
+                back = _hub.Connect(force: true);
+                if (!back) System.Threading.Thread.Sleep(500);
+            }
+
+            Dispatcher.Invoke(() =>
+            {
+                Say(back ? $"{what}; подключились заново" : $"{what}; сервер не отвечает");
+                BuildFixturePanel();
+
+                _painter.Resume(0);
+                if (wasPainting && !_painter.IsRunning) _painter.Start();
+                _recovering = false;
+            });
+        });
     }
 
     void StopPainting()
