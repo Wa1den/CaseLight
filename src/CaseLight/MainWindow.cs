@@ -49,6 +49,14 @@ public sealed partial class MainWindow : Window
     bool _rebuildingUi;
     bool _syncingList;
 
+    /// <summary>
+    /// Set only by the ways out that really mean it: the tray menu and a Windows shutdown.
+    ///
+    /// With the tray enabled the close button hides the window instead of ending the
+    /// program, so without this flag there would be no way left to quit at all.
+    /// </summary>
+    bool _reallyClosing;
+
     /// <summary>When we last launched the server, so the wait can be reported honestly.</summary>
     long _serverStartedTicks;
 
@@ -113,8 +121,18 @@ public sealed partial class MainWindow : Window
         _ui.Tick += (_, _) => RefreshUi();
         _ui.Start();
 
-        Closing += (_, _) =>
+        // a Windows shutdown must not be cancelled into the tray
+        Application.Current.SessionEnding += (_, _) => _reallyClosing = true;
+
+        Closing += (_, e) =>
         {
+            if (!_reallyClosing && _scene.MinimizeToTray)
+            {
+                e.Cancel = true;
+                Hide();
+                return;
+            }
+
             SaveWindowGeometry();
 
             if (_scene.OffOnExit) _hub.Blackout();
@@ -712,7 +730,7 @@ public sealed partial class MainWindow : Window
         menu.Items.Add("Старт", null, (_, _) => StartPainting());
         menu.Items.Add("Стоп", null, (_, _) => StopPainting());
         menu.Items.Add(new System.Windows.Forms.ToolStripSeparator());
-        menu.Items.Add("Выход", null, (_, _) => Close());
+        menu.Items.Add("Выход", null, (_, _) => { _reallyClosing = true; Close(); });
 
         _tray.ContextMenuStrip = menu;
         _tray.DoubleClick += (_, _) => RestoreFromTray();

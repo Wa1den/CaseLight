@@ -100,11 +100,31 @@ public sealed class SceneView : FrameworkElement
         InvalidateVisual();
     }
 
+    // ---- цвета ------------------------------------------------------------
+
+    /// <summary>
+    /// The canvas is drawn by hand, so it has to fetch the theme colours itself instead of
+    /// inheriting them from a control template. The aliases come from App.xaml and follow
+    /// the system light/dark switch; a redraw picks up whatever they hold at that moment.
+    /// </summary>
+    static Brush Themed(string key) =>
+        Application.Current?.TryFindResource(key) as Brush ?? Brushes.Gray;
+
+    static Color ThemedColor(string key) =>
+        Themed(key) is SolidColorBrush b ? b.Color : Colors.Gray;
+
+    /// <summary>The foreground colour at a given transparency, for fills and faint outlines.</summary>
+    static Brush Ink(double opacity)
+    {
+        var c = ThemedColor("Fg");
+        return new SolidColorBrush(Color.FromArgb((byte)(255 * Math.Clamp(opacity, 0, 1)), c.R, c.G, c.B));
+    }
+
     // ---- отрисовка --------------------------------------------------------
 
     protected override void OnRender(DrawingContext dc)
     {
-        dc.DrawRectangle(new SolidColorBrush(Color.FromRgb(24, 26, 30)), null,
+        dc.DrawRectangle(Themed("Panel"), null,
                          new Rect(0, 0, ActualWidth, ActualHeight));
 
         DrawGrid(dc);
@@ -123,15 +143,15 @@ public sealed class SceneView : FrameworkElement
         double halfPx = TestSizeMm / 2 * _scale;
 
         var fill = new SolidColorBrush(Color.FromArgb(150, TestColor.R, TestColor.G, TestColor.B));
-        var pen = new Pen(Brushes.White, 1.5);
+        var pen = new Pen(Themed("Fg"), 1.5);
 
         if (TestShape == TestShape.Circle)
             dc.DrawEllipse(fill, pen, centre, halfPx, halfPx);
         else
             dc.DrawRectangle(fill, pen, new Rect(centre.X - halfPx, centre.Y - halfPx, halfPx * 2, halfPx * 2));
 
-        Label(dc, "тестовое пятно — тяни мышью", new Point(centre.X - halfPx, centre.Y - halfPx - 18),
-              Colors.White, 12);
+        Label(dc, "тестовое пятно, перемещается мышью", new Point(centre.X - halfPx, centre.Y - halfPx - 18),
+              ThemedColor("Fg"), 12);
     }
 
     bool HitTestPatch(Point px)
@@ -146,7 +166,7 @@ public sealed class SceneView : FrameworkElement
 
     void DrawGrid(DrawingContext dc)
     {
-        var pen = new Pen(new SolidColorBrush(Color.FromRgb(38, 41, 47)), 1);
+        var pen = new Pen(Themed("PanelStroke"), 1);
 
         // 100 mm grid, dropped once it would turn into mush
         double stepPx = 100 * _scale;
@@ -164,10 +184,9 @@ public sealed class SceneView : FrameworkElement
         var br = ToScreen(new Point(m.CenterX + m.Width / 2, m.CenterY + m.Height / 2));
         var rect = new Rect(tl, br);
 
-        dc.DrawRectangle(new SolidColorBrush(Color.FromRgb(32, 36, 44)),
-                         new Pen(new SolidColorBrush(Color.FromRgb(90, 98, 112)), 2), rect);
+        dc.DrawRectangle(Ink(0.05), new Pen(Ink(0.35), 2), rect);
 
-        Label(dc, "монитор", new Point(rect.Left + 8, rect.Top + 6), Color.FromRgb(150, 158, 172), 13);
+        Label(dc, "монитор", new Point(rect.Left + 8, rect.Top + 6), ThemedColor("FgDim"), 13);
     }
 
     void DrawFixture(DrawingContext dc, Fixture f, bool selected)
@@ -184,7 +203,7 @@ public sealed class SceneView : FrameworkElement
 
         var tint = ParseTint(f.Tint);
         var fill = new SolidColorBrush(Color.FromArgb((byte)(selected ? 46 : 24), tint.R, tint.G, tint.B));
-        var pen = new Pen(new SolidColorBrush(selected ? Colors.White : tint), selected ? 2 : 1);
+        var pen = new Pen(selected ? Themed("Fg") : new SolidColorBrush(tint), selected ? 2 : 1);
 
         dc.DrawGeometry(fill, pen, geometry);
 
@@ -209,7 +228,7 @@ public sealed class SceneView : FrameworkElement
 
         var top = corners.OrderBy(c => c.Y).First();
         Label(dc, $"{f.Name} · {f.LedCount}", new Point(top.X - 20, top.Y - 20),
-              selected ? Colors.White : Color.FromRgb(170, 178, 192), 12);
+              ThemedColor(selected ? "Fg" : "FgDim"), 12);
     }
 
     /// <summary>True for the few LEDs just after the anchor, walked the way the fixture is walked.</summary>
@@ -227,10 +246,10 @@ public sealed class SceneView : FrameworkElement
     void DrawHandles(DrawingContext dc, Fixture f)
     {
         var corners = LedGeometry.Corners(f).Select(ToScreen).ToArray();
-        var pen = new Pen(Brushes.White, 1.5);
+        var pen = new Pen(Themed("Fg"), 1.5);
 
         foreach (var c in corners)
-            dc.DrawRectangle(Brushes.White, pen,
+            dc.DrawRectangle(Themed("Fg"), pen,
                              new Rect(c.X - HandleRadius / 2, c.Y - HandleRadius / 2, HandleRadius, HandleRadius));
 
         var handle = RotateHandle(f);
