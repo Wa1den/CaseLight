@@ -36,6 +36,9 @@ public static class Ui
     public static Brush FgDim => Res("FgDim");
     public static Brush Panel => Res("Panel");
     public static Brush PanelStroke => Res("PanelStroke");
+
+    /// <summary>Opaque surface, for panels that float over the canvas.</summary>
+    public static Brush PanelSolid => Res("PanelSolid");
     public static Brush Warn => Res("Warn");
 
     public static FontFamily IconFont =>

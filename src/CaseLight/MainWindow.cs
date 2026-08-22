@@ -224,6 +224,7 @@ public sealed partial class MainWindow : Window
             Content = _fixturePanel,
             VerticalScrollBarVisibility = ScrollBarVisibility.Auto
         });
+        _fixtureOverlay.Background = Ui.PanelSolid;
         _fixtureOverlay.Width = 340;
         _fixtureOverlay.Margin = new Thickness(0, 10, 10, 10);
         _fixtureOverlay.HorizontalAlignment = HorizontalAlignment.Right;

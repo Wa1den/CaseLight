@@ -12,6 +12,11 @@
         <SolidColorBrush x:Key="Panel" Color="{DynamicResource CardBackgroundFillColorDefault}" />
         <SolidColorBrush x:Key="PanelStroke" Color="{DynamicResource CardStrokeColorDefault}" />
 
+        <!-- The card fill is deliberately semi-transparent in Fluent. That reads well on a
+             page, but the fixture panel floats over the canvas, where the grid would show
+             straight through it - so that one gets an opaque surface instead. -->
+        <SolidColorBrush x:Key="PanelSolid" Color="{DynamicResource SolidBackgroundFillColorBase}" />
+
         <FontFamily x:Key="Icons">Segoe Fluent Icons,Segoe MDL2 Assets</FontFamily>
 
         <Style x:Key="Card" TargetType="Border">
