@@ -130,7 +130,7 @@ public static class OpenRgbLauncher
 
         exePath ??= FindExe();
         if (exePath == null || !File.Exists(exePath))
-            return "не нашёл OpenRGB.exe — укажи путь вручную";
+            return "OpenRGB.exe не найден, укажите путь вручную";
 
         try
         {

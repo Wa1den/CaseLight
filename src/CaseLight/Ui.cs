@@ -49,14 +49,34 @@ public static class Ui
         return border;
     }
 
-    public static TextBlock Header(string text) => new()
+    /// <summary>
+    /// A group heading, which may itself carry the explanation for the group.
+    ///
+    /// Some explanations belong to no single control - what an export file contains, what
+    /// the per-channel gains are for - and hanging them on the heading keeps them out of
+    /// the page while leaving them one hover away.
+    /// </summary>
+    public static UIElement Header(string text, string? help = null)
     {
-        Text = text,
-        Foreground = Fg,
-        FontWeight = FontWeights.SemiBold,
-        FontSize = TextSize,
-        Margin = new Thickness(0, 16, 0, 6)
-    };
+        var caption = new TextBlock
+        {
+            Text = text,
+            Foreground = Fg,
+            FontWeight = FontWeights.SemiBold,
+            FontSize = TextSize,
+            VerticalAlignment = VerticalAlignment.Center
+        };
+
+        if (help == null)
+        {
+            caption.Margin = new Thickness(0, 16, 0, 6);
+            return caption;
+        }
+
+        var row = WithHelp(caption, help);
+        row.Margin = new Thickness(0, 16, 0, 6);
+        return row;
+    }
 
     public static TextBlock Note(string text) => new()
     {
@@ -113,15 +133,25 @@ public static class Ui
         return icon;
     }
 
+    /// <summary>A field caption on its own, with its explanation glyph when there is one.</summary>
+    public static UIElement Caption(string label, string? help = null)
+    {
+        var caption = new TextBlock
+        {
+            Text = label,
+            Foreground = FgDim,
+            FontSize = TextSize,
+            VerticalAlignment = VerticalAlignment.Center
+        };
+
+        return help == null ? caption : WithHelp(caption, help);
+    }
+
     /// <summary>A caption, optionally with its explanation glyph, above the editor.</summary>
     public static UIElement Labelled(string label, UIElement editor, string? help = null)
     {
         var panel = new StackPanel { Margin = new Thickness(0, 4, 0, 4) };
-        var caption = new TextBlock { Text = label, Foreground = FgDim, FontSize = TextSize };
-
-        if (help == null) panel.Children.Add(caption);
-        else panel.Children.Add(WithHelp(caption, help));
-
+        panel.Children.Add(Caption(label, help));
         panel.Children.Add(editor);
         return panel;
     }

@@ -336,33 +336,33 @@ public sealed partial class MainWindow : Window
     void BuildGeneralSection() => AddSection("Основное", "\uE713", panel =>
     {
         panel.Children.Add(Ui.Header("Окно"));
-        panel.Children.Add(Ui.Check("Сворачивать в трей", _scene.MinimizeToTray, v => { _scene.MinimizeToTray = v; Touch(); }));
+        panel.Children.Add(Ui.Check("Сворачивать в трей", _scene.MinimizeToTray, v => { _scene.MinimizeToTray = v; Touch(); },
+            "Крестик прячет окно, программа продолжает работать. Выход - через меню значка в трее."));
         panel.Children.Add(Ui.Check("Запускать свёрнутым", _scene.StartMinimized, v => { _scene.StartMinimized = v; Touch(); }));
 
         panel.Children.Add(Ui.Header("Запуск"));
-        panel.Children.Add(Ui.Check("Запускать вместе с Windows", Autostart.IsEnabled(), v => Say(Autostart.Set(v))));
+        panel.Children.Add(Ui.Check("Запускать вместе с Windows", Autostart.IsEnabled(), v => Say(Autostart.Set(v)),
+            "Подсветкой управляет OpenRGB, поэтому автозапуск CaseLight имеет смысл только вместе с автозапуском OpenRGB."));
         panel.Children.Add(Ui.Check("Сразу начинать раскраску", _scene.StartPaintingOnLaunch, v => { _scene.StartPaintingOnLaunch = v; Touch(); }));
-        panel.Children.Add(Ui.Note("Подсветкой распоряжается OpenRGB, и ему нужны права администратора. " +
-                                   "Автозапуск CaseLight поможет только если и OpenRGB стартует сам."));
 
         panel.Children.Add(Ui.Header("Сервер OpenRGB"));
-        panel.Children.Add(Ui.Check("Запускать OpenRGB, если он не запущен", _scene.AutoStartOpenRgb, v => { _scene.AutoStartOpenRgb = v; Touch(); }));
-        panel.Children.Add(Ui.Check("Запускать от администратора", _scene.OpenRgbAsAdmin, v => { _scene.OpenRgbAsAdmin = v; Touch(); }));
-        panel.Children.Add(Ui.Note("Права нужны только ради оперативной памяти на шине SMBus. " +
-                                   "Плата и видеокарта доступны и без них, зато не будет запроса UAC при каждом входе."));
+        panel.Children.Add(Ui.Check("Запускать OpenRGB, если он не запущен", _scene.AutoStartOpenRgb, v => { _scene.AutoStartOpenRgb = v; Touch(); },
+            "Сервер запускается с ключами --server --startminimized: первый открывает порт 6742, второй убирает окно."));
+        panel.Children.Add(Ui.Check("Запускать от администратора", _scene.OpenRgbAsAdmin, v => { _scene.OpenRgbAsAdmin = v; Touch(); },
+            "Права требуются только для оперативной памяти на шине SMBus. Плата и видеокарта доступны без них, и тогда UAC при каждом входе не запрашивается."));
 
-        var pathBox = Ui.Text("Путь к OpenRGB.exe (пусто — найти самому)", _scene.OpenRgbPath, v => { _scene.OpenRgbPath = v; Touch(); });
-        panel.Children.Add(pathBox);
+        panel.Children.Add(Ui.Text("Путь к OpenRGB.exe", _scene.OpenRgbPath, v => { _scene.OpenRgbPath = v; Touch(); },
+            "Пустое поле - искать самостоятельно: сначала в Program Files и %LocalAppData%\\Programs, затем в записях об удалении в реестре."));
         panel.Children.Add(Ui.Row(Ui.Btn("Найти", () =>
         {
             string? found = OpenRgbLauncher.FindExe();
-            Say(found == null ? "OpenRGB.exe не нашёлся — укажи путь вручную" : "нашёл: " + found);
+            Say(found == null ? "OpenRGB.exe не найден, укажите путь вручную" : "Найден: " + found);
         }), Ui.Btn("Запустить сейчас", () => Say(OpenRgbLauncher.Launch(
             string.IsNullOrWhiteSpace(_scene.OpenRgbPath) ? null : _scene.OpenRgbPath, _scene.OpenRgbAsAdmin)))));
 
-        panel.Children.Add(Ui.Header("Настройки"));
+        panel.Children.Add(Ui.Header("Настройки",
+            "Один файл со всем: раскладка, размеры монитора, цвета, захват, питание."));
         panel.Children.Add(Ui.Row(Ui.Btn("Экспорт…", ExportSettings), Ui.Btn("Импорт…", ImportSettings)));
-        panel.Children.Add(Ui.Note("Один файл со всем: раскладка, монитор, цвета, захват, питание."));
 
         panel.Children.Add(Ui.Header("Журнал"));
         panel.Children.Add(Ui.Check("Вести журнал", _scene.WriteLog, v =>
@@ -376,15 +376,10 @@ public sealed partial class MainWindow : Window
 
     void BuildDevicesSection() => AddSection("Устройства", "\uE772", panel =>
     {
-        panel.Children.Add(Ui.Header("Фигуры"));
+        panel.Children.Add(Ui.Header("Фигуры",
+            "Одна фигура на каждое светящееся устройство. Параметры выбранной фигуры открываются панелью поверх холста."));
 
-        _fixtureList = new ListBox
-        {
-            Background = Ui.Panel,
-            Foreground = Ui.Fg,
-            BorderThickness = new Thickness(0),
-            Height = 260
-        };
+        _fixtureList = new ListBox { Height = 260 };
         _fixtureList.SelectionChanged += (_, _) =>
         {
             if (_syncingList) return;
@@ -397,10 +392,8 @@ public sealed partial class MainWindow : Window
             Ui.Btn("Копия", DuplicateFixture),
             Ui.Btn("Удалить", RemoveFixture)));
 
-        panel.Children.Add(Ui.Note("Выбери фигуру — её параметры откроются поверх холста."));
-
-        panel.Children.Add(Ui.Header("Монитор"));
-        panel.Children.Add(Ui.Note("Размер видимой картинки. От него считается, какой участок экрана видит каждый диод."));
+        panel.Children.Add(Ui.Header("Монитор",
+            "Размер видимой части панели, а не корпуса. От него отсчитывается, какой участок экрана приходится на каждый диод."));
         panel.Children.Add(Ui.Num("Ширина, мм", _scene.Monitor.Width, v => { _scene.Monitor.Width = Math.Max(10, v); Touch(); }));
         panel.Children.Add(Ui.Num("Высота, мм", _scene.Monitor.Height, v => { _scene.Monitor.Height = Math.Max(10, v); Touch(); }));
 
@@ -425,18 +418,17 @@ public sealed partial class MainWindow : Window
             RebuildSections();
             Touch();
         };
-        panel.Children.Add(Ui.Labelled("Метод", box));
 
-        if (_scene.CaptureSource == CaptureSource.FromRimlight)
-        {
-            panel.Children.Add(Ui.Note("Кадры приходят от Rimlight через разделяемую память — второго захвата экрана тогда нет вовсе. " +
-                                       "Не забудь включить там «Отдавать снимки экрана в модуль подсветки»."));
-        }
-        else
-        {
-            panel.Children.Add(Ui.Note("Свой захват не зависит от Rimlight, но если тот работает одновременно, экран будет " +
-                                       "сниматься дважды — это лишняя нагрузка на видеокарту."));
+        string help = _scene.CaptureSource == CaptureSource.FromRimlight
+            ? "Кадры приходят от Rimlight через разделяемую память, собственный захват при этом не работает. В Rimlight требуется включить отдачу кадров."
+            : "DDA самый быстрый, но при нём Windows иногда рисует курсор через композицию, и курсор мерцает. WGC работает мягче. GDI доступен всегда. " +
+              "«Автоматически» держит DDA и WGC одновременно и переходит на GDI, когда оба перестают выдавать кадры. " +
+              "От Rimlight собственный захват не зависит, но при одновременной работе экран снимается дважды.";
 
+        panel.Children.Add(Ui.Labelled("Метод", box, help));
+
+        if (_scene.CaptureSource != CaptureSource.FromRimlight)
+        {
             var monitorBox = new ComboBox { Margin = new Thickness(0, 2, 0, 0) };
             var monitors = Native.EnumerateMonitors();
 
@@ -454,14 +446,10 @@ public sealed partial class MainWindow : Window
                 Touch();
             };
             panel.Children.Add(Ui.Labelled("Экран", monitorBox));
-
-            panel.Children.Add(Ui.Note("DDA быстрее всех, но её присутствие иногда заставляет Windows рисовать курсор через " +
-                                       "композицию — курсор начинает мерцать. WGC мягче, GDI работает всегда и всюду. " +
-                                       "«Автоматически» держит DDA и WGC вместе, а GDI закрывает провалы."));
         }
 
-        panel.Children.Add(Ui.Slide("Кадров в секунду", _scene.MaxFps, 1, 120, 1, v => { _scene.MaxFps = (int)v; Touch(); }));
-        panel.Children.Add(Ui.Note("Верхний предел для быстрых устройств. Медленным можно задать свой делитель в параметрах фигуры."));
+        panel.Children.Add(Ui.Slide("Кадров в секунду", _scene.MaxFps, 1, 120, 1, v => { _scene.MaxFps = (int)v; Touch(); }, "",
+            "Верхний предел для быстрых устройств. Медленным задаётся свой делитель в параметрах фигуры."));
 
         panel.Children.Add(Ui.Header("Статистика"));
         _captureStats = Ui.Mono();
@@ -480,7 +468,7 @@ public sealed partial class MainWindow : Window
 
         var wakeBox = new ComboBox { Margin = new Thickness(0, 2, 0, 8) };
         wakeBox.Items.Add("Ничего не делать");
-        wakeBox.Items.Add("Попросить OpenRGB пересканировать устройства");
+        wakeBox.Items.Add("Пересканировать устройства");
         wakeBox.Items.Add("Перезапустить OpenRGB");
         wakeBox.SelectedIndex = (int)_scene.WakeRecovery;
         wakeBox.SelectionChanged += (_, _) =>
@@ -489,39 +477,31 @@ public sealed partial class MainWindow : Window
             _scene.WakeRecovery = (WakeRecovery)wakeBox.SelectedIndex;
             Touch();
         };
-        panel.Children.Add(Ui.Labelled("Что делать", wakeBox));
-        panel.Children.Add(Ui.Note("Во сне контроллеры переподключаются заново, а работавший сервер продолжает писать в " +
-                                   "устаревшие хендлы: он рапортует успех, а корпус светится так же, как при загрузке. " +
-                                   "Перезапуск грубее, но именно он надёжно возвращает управление. Пересканирование мягче, " +
-                                   "однако способно уронить сервер."));
+        panel.Children.Add(Ui.Labelled("Что делать", wakeBox,
+            "Во сне контроллеры переподключаются к USB, а работавший сервер продолжает запись в прежние дескрипторы и возвращает признак успеха: " +
+            "подсветка при этом остаётся в состоянии, установленном при подаче питания. Перезапуск восстанавливает управление надёжнее. " +
+            "Пересканирование действует мягче, но иногда завершает сервер аварийно."));
 
         panel.Children.Add(Ui.Row(Ui.Btn("Перезапустить OpenRGB сейчас", RestartServerNow)));
 
         panel.Children.Add(Ui.Slide("Пауза перед возвратом", _scene.ResumeDelayMs / 1000.0, 0, 30, 1,
-                                    v => { _scene.ResumeDelayMs = (int)(v * 1000); Touch(); }, " с"));
-        panel.Children.Add(Ui.Note("Во сне устройства переподключаются заново, и OpenRGB какое-то время держит устаревшие хендлы — " +
-                                   "в журнале Windows он падал через 41 секунду после пробуждения. Пауза нужна, чтобы не мы оказались " +
-                                   "теми, кто дёрнул шину в этот момент."));
+            v => { _scene.ResumeDelayMs = (int)(v * 1000); Touch(); }, " с",
+            "Первая запись после пробуждения откладывается на это время. По журналу Windows сервер завершался аварийно через 41 секунду после выхода из сна, " +
+            "пока устройства переподключались, а он держал прежние дескрипторы."));
     });
 
     void BuildAboutSection() => AddSection("О программе", "\uE897", panel =>
     {
         panel.Children.Add(Ui.Header("CaseLight " + AppVersion));
 
-        panel.Children.Add(Ui.Note("Подсветка корпуса, повторяющая то, что происходит на экране. " +
-                                   "Каждое светящееся место описывается там, где оно физически стоит, " +
-                                   "и берёт цвет с ближайшего к нему участка картинки — системник рядом " +
-                                   "с монитором читается как его продолжение."));
+        panel.Children.Add(Ui.Note("Подсветка внутри корпуса воспроизводит изображение с экрана. Каждое светящееся устройство " +
+                                   "описывается там, где оно физически стоит, и получает цвет с ближайшего к нему участка экрана."));
 
-        panel.Children.Add(Ui.Note("Управление железом идёт через OpenRGB: материнская плата, ленты и " +
-                                   "вентиляторы на её разъёмах, видеокарта, оперативная память. " +
-                                   "Программа сама поднимает сервер, если он не запущен, и возвращает " +
-                                   "подсветку к жизни после сна."));
+        panel.Children.Add(Ui.Note("Управление идёт через OpenRGB: плата, ленты и вентиляторы на её разъёмах, видеокарта, память. " +
+                                   "Сервер запускается программой, если не запущен, и перезапускается после выхода из сна."));
 
-        panel.Children.Add(Ui.Note("Кадры можно брать двумя способами: захватывать экран самостоятельно " +
-                                   "или получать от Rimlight, подсветки монитора. Rimlight при этом " +
-                                   "не обязателен — он нужен только тем, у кого есть лента за монитором " +
-                                   "и отдельный контроллер к ней."));
+        panel.Children.Add(Ui.Note("Кадры берутся собственным захватом или принимаются от Rimlight, подсветки монитора. " +
+                                   "Rimlight не обязателен."));
 
         panel.Children.Add(Ui.Link("Репозиторий:", "https://github.com/Wa1den/CaseLight"));
         panel.Children.Add(Ui.Link("Rimlight, подсветка монитора:", "https://github.com/Wa1den/Rimlight"));
@@ -591,7 +571,7 @@ public sealed partial class MainWindow : Window
         if (dialog.ShowDialog() != true) return;
 
         try { _scene.Save(dialog.FileName); Say("Экспортировано: " + dialog.FileName); }
-        catch (Exception ex) { Say("Не удалось выгрузить: " + ex.Message); }
+        catch (Exception ex) { Say("Не удалось сохранить: " + ex.Message); }
     }
 
     void ImportSettings()
@@ -616,7 +596,7 @@ public sealed partial class MainWindow : Window
             _view.FitToContent();
             UpdateDirtyBar();
 
-            Say("Импортировано. Проверь раскладку и нажми «Применить», если всё верно.");
+            Say("Импортировано. Проверьте раскладку и нажмите «Применить».");
         }
         catch (Exception ex)
         {
@@ -681,7 +661,7 @@ public sealed partial class MainWindow : Window
         // Stop writing before touching the server: a rescan with an active client is what
         // crashed it by hand, and a restart would be writing into a dying process.
         _painter.Pause("восстановление после сна");
-        Say("Пробуждение: привожу OpenRGB в чувство…");
+        Say("Пробуждение: восстановление связи с OpenRGB.");
 
         System.Threading.Tasks.Task.Run(() =>
         {
@@ -708,7 +688,7 @@ public sealed partial class MainWindow : Window
             {
                 Say(back
                     ? $"{what}; подсветка восстановлена"
-                    : $"{what}; сервер не отвечает — нажми «Переподключиться»");
+                    : $"{what}; сервер не отвечает, нажмите «Переподключиться»");
 
                 BuildFixturePanel();
 
@@ -766,7 +746,7 @@ public sealed partial class MainWindow : Window
             {
                 if (_hub.Connect()) { Say(_hub.Status); BuildFixturePanel(); }
                 else if (_serverStartedTicks > 0 && Environment.TickCount64 - _serverStartedTicks < OpenRgbLauncher.TypicalStartupMs)
-                    Say("OpenRGB запускается и ищет устройства…");
+                    Say("OpenRGB запускается, идёт поиск устройств.");
             }
             else if (Environment.TickCount64 - _lastEmptyRefresh > 2000)
             {
@@ -776,7 +756,7 @@ public sealed partial class MainWindow : Window
                 _hub.Refresh();
 
                 if (_hub.IsReady) { Say(_hub.Status); BuildFixturePanel(); }
-                else Say("OpenRGB подключен, но устройств пока нет — ищет…");
+                else Say("OpenRGB подключён, устройств пока нет: идёт поиск.");
             }
         }
 
@@ -788,7 +768,7 @@ public sealed partial class MainWindow : Window
                 $"источник:   {_painter.SourceInfo}\n" +
                 $"состояние:  {_painter.Status}\n" +
                 $"кадров:     принято {_painter.FramesReceived}, отрисовано {_painter.FramesPainted}\n" +
-                $"частота:    {_painter.Fps:F1} к/с\n" +
+                $"частота:    {_painter.Fps:F1} кадров в секунду\n" +
                 $"возраст:    {_painter.LastFrameAgeMs} мс\n" +
                 $"диодов:     {_painter.LedCount}\n" +
                 $"OpenRGB:    {_hub.Status}";
@@ -803,7 +783,7 @@ public sealed partial class MainWindow : Window
 
     void ConnectHub()
     {
-        if (_recovering) { Say("Идёт восстановление связи, подожди…"); return; }
+        if (_recovering) { Say("Идёт восстановление связи."); return; }
 
         EnsureServer();
         _hub.Connect(force: true);
@@ -866,7 +846,7 @@ public sealed partial class MainWindow : Window
         bool wasPainting = _painter.IsRunning;
         _recovering = true;
         _painter.Pause("перезапуск OpenRGB");
-        Say("Перезапускаю OpenRGB…");
+        Say("Перезапуск OpenRGB.");
 
         System.Threading.Tasks.Task.Run(() =>
         {

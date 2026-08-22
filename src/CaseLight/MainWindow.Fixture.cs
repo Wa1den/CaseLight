@@ -120,9 +120,9 @@ public sealed partial class MainWindow
         var head = new DockPanel { Margin = new Thickness(0, 0, 0, 4) };
         var close = new Button
         {
-            Content = "✕",
-            Width = 26,
-            Height = 26,
+            Content = new TextBlock { Text = "\uE711", FontFamily = Ui.IconFont, FontSize = 12 },
+            Width = 28,
+            Height = 28,
             Padding = new Thickness(0),
             ToolTip = "Закрыть параметры"
         };
@@ -141,9 +141,8 @@ public sealed partial class MainWindow
 
         _fixturePanel.Children.Add(Ui.Text("Название", f.Name, v => { f.Name = v; SyncFixtureList(); Touch(); }));
         _fixturePanel.Children.Add(Ui.Check("Участвует в раскраске", f.Enabled, v => { f.Enabled = v; SyncFixtureList(); Touch(); }));
-        _fixturePanel.Children.Add(Ui.Int("Обновлять раз в N кадров", f.UpdateEvery, v => { f.UpdateEvery = Math.Max(1, v); Touch(); }));
-        _fixturePanel.Children.Add(Ui.Note("1 — каждый кадр. Оперативной памяти нужно больше: она сидит на медленной шине SMBus, " +
-                                           "и запись в неё каждый кадр задерживает всё остальное. 10–15 обычно достаточно."));
+        _fixturePanel.Children.Add(Ui.Int("Обновлять раз в N кадров", f.UpdateEvery, v => { f.UpdateEvery = Math.Max(1, v); Touch(); },
+            "1 — каждый кадр. Оперативной памяти требуется больше: она подключена по SMBus, запись туда медленная и на полной частоте задерживает остальные устройства. Обычно достаточно 10–15."));
 
         _fixturePanel.Children.Add(Ui.Row(Ui.Btn("Найти в корпусе", HighlightSelected)));
 
@@ -191,13 +190,13 @@ public sealed partial class MainWindow
         }
         else
         {
-            _fixturePanel.Children.Add(Ui.Note($"Контроллер «{f.Binding.DeviceName}» сейчас не виден. " +
-                                               "Он либо отключён в OpenRGB, либо сервер ещё не поднялся. Фигура при этом просто не участвует в раскраске."));
+            _fixturePanel.Children.Add(Ui.Note($"Контроллер «{f.Binding.DeviceName}» не виден: он отключён в OpenRGB " +
+                                               "либо сервер ещё не запущен. Фигура при этом не участвует в раскраске."));
         }
 
         _fixturePanel.Children.Add(Ui.Int("Первый диод зоны", f.Binding.FirstLed, v => { f.Binding.FirstLed = Math.Max(0, v); Touch(); }));
-        _fixturePanel.Children.Add(Ui.Int("Сколько диодов", f.Binding.LedCount, v => { f.Binding.LedCount = Math.Max(0, v); Touch(); }));
-        _fixturePanel.Children.Add(Ui.Note("Если на одном разъёме несколько разных вещей, их можно развести по фигурам, поделив диапазон."));
+        _fixturePanel.Children.Add(Ui.Int("Сколько диодов", f.Binding.LedCount, v => { f.Binding.LedCount = Math.Max(0, v); Touch(); },
+            "Если на одном разъёме несколько устройств, их разводят по разным фигурам, поделив диапазон диодов."));
 
         // ---- место
         _fixturePanel.Children.Add(Ui.Header("Место в корпусе, мм"));
@@ -238,14 +237,9 @@ public sealed partial class MainWindow
             _fixturePanel.Children.Add(Ui.Check("Контур круглый", f.RoundContour, v => { f.RoundContour = v; BuildFixturePanel(); Touch(); }));
 
             if (!f.RoundContour)
-            {
                 _fixturePanel.Children.Add(Ui.Num("Пропорция рамки (высота ÷ ширина)", f.ContourAspect,
-                                                  v => { f.ContourAspect = Math.Max(0.05, v); Touch(); }));
-                _fixturePanel.Children.Add(Ui.Note("Форма самой рамки, а не её места на сцене. У рамки тройной вертушки это примерно 3."));
-            }
-
-            _fixturePanel.Children.Add(Ui.Note("У замкнутого контура нет своего первого диода — его надо назначить. " +
-                                               "Для вертушки, стоящей ребром, это тот, что физически внизу."));
+                                                  v => { f.ContourAspect = Math.Max(0.05, v); Touch(); },
+                    "Пропорции самой рамки, а не её места на плане. У рамки тройного вентилятора это примерно 3."));
         }
 
         if (f.Arrangement != Arrangement.Point)
@@ -256,12 +250,8 @@ public sealed partial class MainWindow
 
         if (f.Arrangement == Arrangement.Closed)
         {
-            _fixturePanel.Children.Add(Ui.Check("Стоит ребром ко мне", f.EdgeOn, v => { f.EdgeOn = v; BuildFixturePanel(); Touch(); }));
-
-            if (f.EdgeOn)
-                _fixturePanel.Children.Add(Ui.Note("Кольцо видно с торца, поэтому оно сжимается в вертикальную линию: " +
-                                                   "от начального диода высота растёт в обе стороны и сходится наверху. " +
-                                                   "Ширина фигуры на цвет тогда не влияет."));
+            _fixturePanel.Children.Add(Ui.Check("Обращена ребром к наблюдателю", f.EdgeOn, v => { f.EdgeOn = v; BuildFixturePanel(); Touch(); },
+                "Кольцо видно с торца и сводится к вертикальной линии: от начального диода высота растёт в обе стороны и сходится наверху. Ширина фигуры на цвет тогда не влияет."));
         }
     }
 
@@ -272,7 +262,9 @@ public sealed partial class MainWindow
     UIElement AnchorRow(Fixture f)
     {
         var panel = new StackPanel { Margin = new Thickness(0, 6, 0, 6) };
-        panel.Children.Add(new TextBlock { Text = "Начальный диод", Foreground = Ui.FgDim, FontSize = 11 });
+        panel.Children.Add(Ui.Caption("Начальный диод",
+            "У замкнутого контура нет собственного первого диода, его назначают. Для вентилятора, обращённого ребром, это диод, расположенный внизу. " +
+            "Кнопка «показать» зажигает только его."));
 
         var row = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 4, 0, 0) };
 
@@ -280,8 +272,9 @@ public sealed partial class MainWindow
         {
             Text = f.AnchorLed.ToString(),
             Foreground = Ui.Fg,
-            FontSize = 18,
+            FontSize = 16,
             Width = 46,
+            TextAlignment = TextAlignment.Center,
             VerticalAlignment = VerticalAlignment.Center
         };
 
@@ -307,64 +300,62 @@ public sealed partial class MainWindow
     {
         if (_painter.IsRunning)
         {
-            Say("Останови раскраску, иначе она сразу перекрасит подсветку обратно.");
+            Say("Раскраска перезапишет подсветку. Остановите её перед проверкой.");
             return;
         }
 
         if (!_hub.Connect()) { Say(_hub.Status); return; }
 
         _hub.HighlightLed(f, f.AnchorLed, 255, 60, 0);
-        Say($"Горит только диод {f.AnchorLed} — он считается началом.");
+        Say($"Горит только диод {f.AnchorLed}, он считается начальным.");
     }
 
     void HighlightSelected()
     {
-        if (_view.Selected == null) { Say("Сначала выбери фигуру."); return; }
+        if (_view.Selected == null) { Say("Фигура не выбрана."); return; }
 
         if (_painter.IsRunning)
         {
-            Say("Сначала останови раскраску — иначе она сразу перекрасит подсветку обратно.");
+            Say("Раскраска перезапишет подсветку. Остановите её перед проверкой.");
             return;
         }
 
         if (!_hub.Connect()) { Say(_hub.Status); return; }
 
         _hub.Highlight(_view.Selected, 255, 255, 255);
-        Say($"Горит только «{_view.Selected.Name}» — так её видно в корпусе.");
+        Say($"Горит только «{_view.Selected.Name}».");
     }
 
     // ---- вкладка цветов и тест размещения ---------------------------------
 
-    void BuildColorsSection() => AddSection("Цвета", "", panel =>
+    void BuildColorsSection() => AddSection("Цвета", "\uE790", panel =>
     {
         panel.Children.Add(Ui.Header("Как берётся цвет"));
-        panel.Children.Add(Ui.Num("Область выборки, мм", _scene.SampleRadiusMm, v => { _scene.SampleRadiusMm = Math.Max(1, v); Touch(); }));
-        panel.Children.Add(Ui.Note("Сколько экрана усредняет один диод. Мало — дёргается на любом движении, много — всё сливается в один бурый цвет."));
+        panel.Children.Add(Ui.Num("Область выборки, мм", _scene.SampleRadiusMm, v => { _scene.SampleRadiusMm = Math.Max(1, v); Touch(); },
+            "Размер участка экрана, усредняемого для одного диода. При малом значении цвет меняется от любого движения в кадре, при большом усредняется до однородного оттенка."));
 
         panel.Children.Add(Ui.Header("Коррекция"));
         panel.Children.Add(Ui.Slide("Яркость", _scene.Brightness, 0, 1, 0.01, v => { _scene.Brightness = v; Touch(); }));
         panel.Children.Add(Ui.Slide("Насыщенность", _scene.Saturation, 0, 3, 0.05, v => { _scene.Saturation = v; Touch(); }));
         panel.Children.Add(Ui.Slide("Гамма", _scene.Gamma, 0.5, 4, 0.05, v => { _scene.Gamma = v; Touch(); }));
         panel.Children.Add(Ui.Slide("Температура", _scene.TemperatureK, 1500, 15000, 100, v => { _scene.TemperatureK = (int)v; Touch(); }, " K"));
-        panel.Children.Add(Ui.Slide("Порог темноты", _scene.MinLuma, 0, 0.5, 0.01, v => { _scene.MinLuma = v; Touch(); }));
-        panel.Children.Add(Ui.Note("Ниже этой яркости диод гаснет совсем, чтобы почти чёрный экран не оставлял корпус тускло подсвеченным."));
+        panel.Children.Add(Ui.Slide("Порог темноты", _scene.MinLuma, 0, 0.5, 0.01, v => { _scene.MinLuma = v; Touch(); }, "",
+            "Ниже этой яркости диод гаснет полностью. Иначе почти чёрный экран оставляет подсветку тускло горящей."));
 
-        panel.Children.Add(Ui.Header("Баланс по каналам"));
+        panel.Children.Add(Ui.Header("Баланс по каналам",
+            "Диоды на плате, модулях памяти и вентиляторах передают цвет по-разному. Здесь задаётся общая поправка."));
         panel.Children.Add(Ui.Slide("Красный", _scene.GainR, 0, 2, 0.01, v => { _scene.GainR = v; Touch(); }));
         panel.Children.Add(Ui.Slide("Зелёный", _scene.GainG, 0, 2, 0.01, v => { _scene.GainG = v; Touch(); }));
         panel.Children.Add(Ui.Slide("Синий", _scene.GainB, 0, 2, 0.01, v => { _scene.GainB = v; Touch(); }));
-        panel.Children.Add(Ui.Note("Диоды на плате, в памяти и на вертушках по цвету заметно разные; это общий подгон под то, что видит глаз."));
 
-        panel.Children.Add(Ui.Header("Плавность"));
+        panel.Children.Add(Ui.Header("Плавность",
+            "Больше значение — быстрее переход. Привычнее выглядит быстрое нарастание и плавный спад."));
         panel.Children.Add(Ui.Slide("Разгорается", _scene.SmoothingRise, 0.01, 1, 0.01, v => { _scene.SmoothingRise = v; Touch(); }));
         panel.Children.Add(Ui.Slide("Гаснет", _scene.SmoothingFall, 0.01, 1, 0.01, v => { _scene.SmoothingFall = v; Touch(); }));
-        panel.Children.Add(Ui.Note("Больше — быстрее. Свет привычнее выглядит, когда нарастает резко, а спадает плавно."));
 
-        // ---- тест
-        panel.Children.Add(Ui.Header("Тест цветов и размещения"));
-        panel.Children.Add(Ui.Note("Вместо экрана — одно пятно, которое таскаешь мышью по холсту. " +
-                                   "Всё вне пятна чёрное, внутри — выбранный цвет, пропущенный через те же настройки. " +
-                                   "Это единственный способ честно проверить, что светится именно то, что должно."));
+        panel.Children.Add(Ui.Header("Тест размещения",
+            "Вместо кадра экрана используется одно пятно, которое перемещается мышью по холсту. Вне пятна цвет чёрный, внутри — выбранный, " +
+            "проходящий через те же настройки. Так проверяется, что загорается именно то устройство, около которого стоит пятно."));
 
         _testButton = Ui.Btn(_painter.TestActive ? "Завершить тест" : "Запустить тест", ToggleTest);
         panel.Children.Add(Ui.Row(_testButton));
@@ -396,7 +387,7 @@ public sealed partial class MainWindow
             Width = 28,
             Height = 22,
             CornerRadius = new CornerRadius(3),
-            BorderBrush = Ui.FgDim,
+            BorderBrush = Ui.PanelStroke,
             BorderThickness = new Thickness(1),
             Margin = new Thickness(0, 0, 8, 0),
             Background = new SolidColorBrush(ParseColor(_scene.TestColor))
@@ -463,7 +454,7 @@ public sealed partial class MainWindow
         _painter.Start();
 
         if (_testButton != null) _testButton.Content = "Завершить тест";
-        Say("Тест идёт: таскай пятно по холсту и смотри, что загорается в корпусе.");
+        Say("Тест запущен. Пятно перемещается мышью по холсту.");
     }
 
     void StopTest()

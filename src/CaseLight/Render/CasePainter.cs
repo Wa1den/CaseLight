@@ -202,7 +202,7 @@ public sealed class CasePainter : IDisposable
             long hold = _holdUntilTicks - Environment.TickCount64;
             if (hold > 0)
             {
-                Status = $"жду, пока железо очнётся после сна: {hold / 1000.0:F0} с";
+                Status = $"ожидание готовности устройств после сна: {hold / 1000.0:F0} с";
                 Thread.Sleep(Math.Min(500, (int)hold));
                 continue;
             }
@@ -220,7 +220,7 @@ public sealed class CasePainter : IDisposable
 
             if (_targets.Length == 0)
             {
-                Status = "не к чему привязываться: нет включённых фигур с диодами";
+                Status = "нет включённых фигур с диодами";
                 Thread.Sleep(300);
                 continue;
             }
@@ -277,7 +277,7 @@ public sealed class CasePainter : IDisposable
             {
                 // The OpenRGB server dies on its own often enough that this is an expected
                 // state; reconnecting re-resolves every binding and restores direct mode.
-                Status = "OpenRGB отвалился, переподключаюсь";
+                Status = "связь с OpenRGB потеряна, переподключение";
                 Thread.Sleep(500);
                 continue;
             }
@@ -292,8 +292,8 @@ public sealed class CasePainter : IDisposable
                 framesThisSecond = 0;
                 fpsWindow = tick;
                 Status = test != null
-                    ? $"тест размещения, {Fps:F0} к/с"
-                    : $"идёт раскраска, {Fps:F0} к/с";
+                    ? $"тест размещения, {Fps:F0} кадров в секунду"
+                    : $"идёт раскраска, {Fps:F0} кадров в секунду";
             }
 
             Thread.Sleep(periodMs);
@@ -311,7 +311,7 @@ public sealed class CasePainter : IDisposable
     {
         if (!EnsureCapture())
         {
-            Status = "не нашёл экран для захвата";
+            Status = "экран для захвата не найден";
             SourceInfo = "нет источника";
             Thread.Sleep(500);
             return false;
@@ -387,7 +387,7 @@ public sealed class CasePainter : IDisposable
     {
         if (!_bus.TryAttach())
         {
-            Status = "жду кадры: " + _bus.Status;
+            Status = "ожидание кадров: " + _bus.Status;
             SourceInfo = "нет источника";
             Thread.Sleep(200);
             return false;
