@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Windows;
 using System.Windows.Controls;
@@ -34,7 +35,9 @@ public sealed partial class MainWindow : Window
 
     System.Windows.Forms.NotifyIcon? _tray;
 
-    TabControl _tabs = null!;
+    ListBox _nav = null!;
+    ContentControl _pageHost = null!;
+    readonly List<UIElement> _pages = new();
     Border _dirtyBar = null!;
     Border _fixtureOverlay = null!;
     StackPanel _fixturePanel = null!;
@@ -94,7 +97,7 @@ public sealed partial class MainWindow : Window
 
             EnsureServer();
             ConnectHub();
-            RebuildTabs();
+            RebuildSections();
             SyncFixtureList();
             _view.FitToContent();
 
@@ -137,61 +140,84 @@ public sealed partial class MainWindow : Window
     UIElement BuildLayout()
     {
         var grid = new Grid();
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(440) });
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         grid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
         grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
 
-        // ---- слева: вкладки и полоса применения
-        var left = new Grid { Margin = new Thickness(10, 10, 5, 10) };
-        left.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
-        left.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-
-        _tabs = new TabControl();
-
-        // The fixture panel belongs to one tab only; leaving it hanging over the canvas
-        // while looking at, say, power settings is just clutter.
-        _tabs.SelectionChanged += (_, e) =>
+        // ---- слева: столбец разделов шириной по самой длинной подписи
+        _nav = new ListBox
         {
-            if (e.Source == _tabs) HideFixturePanel();
+            Background = Brushes.Transparent,
+            BorderThickness = new Thickness(0),
+            VerticalAlignment = VerticalAlignment.Top,
+            Margin = new Thickness(6, 12, 6, 12)
+        };
+        ScrollViewer.SetHorizontalScrollBarVisibility(_nav, ScrollBarVisibility.Disabled);
+
+        // Свой отступ у пунктов: стандартный тесноват для строки со значком. Стиль без
+        // BasedOn не отменяет тему - шаблон по-прежнему приходит из неё.
+        var itemStyle = new Style(typeof(ListBoxItem));
+        itemStyle.Setters.Add(new Setter(Control.PaddingProperty, new Thickness(12, 9, 12, 9)));
+        itemStyle.Setters.Add(new Setter(FrameworkElement.MarginProperty, new Thickness(0, 1, 0, 1)));
+        _nav.ItemContainerStyle = itemStyle;
+
+        _nav.SelectionChanged += (_, _) =>
+        {
+            if (_rebuildingUi) return;
+
+            int i = _nav.SelectedIndex;
+            if (i < 0 || i >= _pages.Count) return;
+
+            _pageHost.Content = _pages[i];
+
+            // The fixture panel belongs to one section only; leaving it over the canvas
+            // while looking at, say, power settings is just clutter.
+            HideFixturePanel();
         };
 
-        Grid.SetRow(_tabs, 0);
-        left.Children.Add(_tabs);
+        Grid.SetColumn(_nav, 0);
+        grid.Children.Add(_nav);
+
+        // ---- по центру: страница выбранного раздела и полоса применения
+        var page = new Grid { Margin = new Thickness(0, 12, 12, 12) };
+        page.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+        page.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+
+        _pageHost = new ContentControl();
+        Grid.SetRow(_pageHost, 0);
+        page.Children.Add(_pageHost);
 
         _dirtyBar = BuildDirtyBar();
         Grid.SetRow(_dirtyBar, 1);
-        left.Children.Add(_dirtyBar);
+        page.Children.Add(_dirtyBar);
 
-        Grid.SetColumn(left, 0);
-        grid.Children.Add(left);
+        Grid.SetColumn(page, 1);
+        grid.Children.Add(page);
 
         // ---- справа: холст и панель фигуры поверх него
-        var right = new Grid { Margin = new Thickness(5, 10, 10, 10) };
+        var right = new Grid { Margin = new Thickness(0, 12, 12, 12) };
         right.Children.Add(_view);
 
         _fixturePanel = new StackPanel();
-        _fixtureOverlay = new Border
+        _fixtureOverlay = Ui.Card(new ScrollViewer
         {
-            Background = new SolidColorBrush(Color.FromArgb(242, 34, 37, 44)),
-            BorderBrush = new SolidColorBrush(Color.FromRgb(70, 76, 88)),
-            BorderThickness = new Thickness(1),
-            CornerRadius = new CornerRadius(6),
-            Padding = new Thickness(12),
-            Width = 340,
-            Margin = new Thickness(0, 10, 10, 10),
-            HorizontalAlignment = HorizontalAlignment.Right,
-            VerticalAlignment = VerticalAlignment.Stretch,
-            Visibility = Visibility.Collapsed,
-            Child = new ScrollViewer { Content = _fixturePanel, VerticalScrollBarVisibility = ScrollBarVisibility.Auto }
-        };
+            Content = _fixturePanel,
+            VerticalScrollBarVisibility = ScrollBarVisibility.Auto
+        });
+        _fixtureOverlay.Width = 340;
+        _fixtureOverlay.Margin = new Thickness(0, 10, 10, 10);
+        _fixtureOverlay.HorizontalAlignment = HorizontalAlignment.Right;
+        _fixtureOverlay.VerticalAlignment = VerticalAlignment.Stretch;
+        _fixtureOverlay.Visibility = Visibility.Collapsed;
         right.Children.Add(_fixtureOverlay);
 
-        Grid.SetColumn(right, 1);
+        Grid.SetColumn(right, 2);
         grid.Children.Add(right);
 
         // ---- низ: действия и статус
-        var bottom = new StackPanel { Margin = new Thickness(10, 0, 10, 10), Orientation = Orientation.Horizontal };
+        var bottom = new StackPanel { Margin = new Thickness(12, 0, 12, 12), Orientation = Orientation.Horizontal };
         bottom.Children.Add(Ui.Btn("Старт", StartPainting));
         bottom.Children.Add(Ui.Btn("Стоп", StopPainting));
         bottom.Children.Add(Ui.Btn("Переподключиться", ConnectHub));
@@ -199,7 +225,8 @@ public sealed partial class MainWindow : Window
 
         _status = new TextBlock
         {
-            Foreground = Brushes.Silver,
+            Foreground = Ui.FgDim,
+            FontSize = Ui.TextSize,
             VerticalAlignment = VerticalAlignment.Center,
             Margin = new Thickness(12, 0, 0, 0),
             TextWrapping = TextWrapping.Wrap
@@ -207,7 +234,7 @@ public sealed partial class MainWindow : Window
         bottom.Children.Add(_status);
 
         Grid.SetRow(bottom, 1);
-        Grid.SetColumnSpan(bottom, 2);
+        Grid.SetColumnSpan(bottom, 3);
         grid.Children.Add(bottom);
 
         return grid;
@@ -215,7 +242,7 @@ public sealed partial class MainWindow : Window
 
     Border BuildDirtyBar()
     {
-        var apply = Ui.Btn("Применить", ApplyChanges);
+        var apply = Ui.Btn("Применить", ApplyChanges, accent: true);
         var cancel = Ui.Btn("Отмена", CancelChanges);
 
         var dock = new DockPanel();
@@ -225,59 +252,88 @@ public sealed partial class MainWindow : Window
         dock.Children.Add(apply);
         dock.Children.Add(new TextBlock
         {
-            Text = "Есть изменения, которые ещё не сохранены",
+            Text = "Есть несохранённые изменения",
             Foreground = Ui.Warn,
-            FontSize = 12,
+            FontSize = Ui.TextSize,
             VerticalAlignment = VerticalAlignment.Center,
             TextWrapping = TextWrapping.Wrap
         });
 
-        return new Border
-        {
-            Background = Ui.Panel,
-            CornerRadius = new CornerRadius(6),
-            Padding = new Thickness(10),
-            Margin = new Thickness(0, 8, 0, 0),
-            Visibility = Visibility.Collapsed,
-            Child = dock
-        };
+        var card = Ui.Card(dock);
+        card.Padding = new Thickness(12);
+        card.Margin = new Thickness(0, 10, 0, 0);
+        card.Visibility = Visibility.Collapsed;
+        return card;
     }
 
-    // ---- вкладки ----------------------------------------------------------
+    // ---- разделы ----------------------------------------------------------
 
-    void AddTab(string title, Action<StackPanel> build)
+    /// <summary>
+    /// One section: a page of settings on a card, plus its row in the left-hand list.
+    ///
+    /// The page carries no heading of its own - which section is open is already visible
+    /// in the list, and repeating it costs a line at the top of every page.
+    /// </summary>
+    void AddSection(string title, string glyph, Action<StackPanel> build)
     {
-        var panel = new StackPanel { Margin = new Thickness(12) };
+        var panel = new StackPanel();
         build(panel);
 
-        _tabs.Items.Add(new TabItem
+        _pages.Add(new ScrollViewer
         {
-            Header = title,
-            Content = new ScrollViewer { Content = panel, VerticalScrollBarVisibility = ScrollBarVisibility.Auto }
+            VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+            Content = Ui.Card(panel)
         });
+
+        var row = new StackPanel { Orientation = Orientation.Horizontal };
+        row.Children.Add(new TextBlock
+        {
+            Text = glyph,
+            FontFamily = Ui.IconFont,
+            FontSize = 16,
+            Foreground = Ui.Fg,
+            VerticalAlignment = VerticalAlignment.Center
+        });
+        row.Children.Add(new TextBlock
+        {
+            Text = title,
+            FontSize = Ui.TextSize,
+            Foreground = Ui.Fg,
+            Margin = new Thickness(12, 0, 0, 0),
+            VerticalAlignment = VerticalAlignment.Center
+        });
+
+        _nav.Items.Add(new ListBoxItem { Content = row });
     }
 
     /// <summary>Rebuilt wholesale after Cancel or import, since every field may have moved.</summary>
-    void RebuildTabs()
+    void RebuildSections()
     {
         _rebuildingUi = true;
 
-        int selected = _tabs.SelectedIndex;
-        _tabs.Items.Clear();
+        int selected = Math.Max(0, _nav.SelectedIndex);
 
-        BuildGeneralTab();
-        BuildDevicesTab();
-        BuildCaptureTab();
-        BuildColorsTab();
-        BuildPowerTab();
-        BuildAboutTab();
+        _nav.Items.Clear();
+        _pages.Clear();
 
-        if (selected >= 0 && selected < _tabs.Items.Count) _tabs.SelectedIndex = selected;
+        BuildGeneralSection();
+        BuildDevicesSection();
+        BuildCaptureSection();
+        BuildColorsSection();
+        BuildPowerSection();
+        BuildAboutSection();
+
+        selected = Math.Min(selected, _pages.Count - 1);
+
+        // The selection change arrives while the rebuild guard is still up, so the page is
+        // handed over here rather than left to the handler.
+        _nav.SelectedIndex = selected;
+        _pageHost.Content = _pages[selected];
 
         _rebuildingUi = false;
     }
 
-    void BuildGeneralTab() => AddTab("Основное", panel =>
+    void BuildGeneralSection() => AddSection("Основное", "\uE713", panel =>
     {
         panel.Children.Add(Ui.Header("Окно"));
         panel.Children.Add(Ui.Check("Сворачивать в трей", _scene.MinimizeToTray, v => { _scene.MinimizeToTray = v; Touch(); }));
@@ -318,7 +374,7 @@ public sealed partial class MainWindow : Window
         panel.Children.Add(Ui.Note(Scene.LogPath));
     });
 
-    void BuildDevicesTab() => AddTab("Устройства", panel =>
+    void BuildDevicesSection() => AddSection("Устройства", "\uE772", panel =>
     {
         panel.Children.Add(Ui.Header("Фигуры"));
 
@@ -351,7 +407,7 @@ public sealed partial class MainWindow : Window
         SyncFixtureList();
     });
 
-    void BuildCaptureTab() => AddTab("Захват", panel =>
+    void BuildCaptureSection() => AddSection("Захват", "\uE7F4", panel =>
     {
         panel.Children.Add(Ui.Header("Источник кадров"));
 
@@ -366,7 +422,7 @@ public sealed partial class MainWindow : Window
         {
             if (box.SelectedIndex < 0) return;
             _scene.CaptureSource = (CaptureSource)box.SelectedIndex;
-            RebuildTabs();
+            RebuildSections();
             Touch();
         };
         panel.Children.Add(Ui.Labelled("Метод", box));
@@ -412,7 +468,7 @@ public sealed partial class MainWindow : Window
         panel.Children.Add(_captureStats);
     });
 
-    void BuildPowerTab() => AddTab("Питание", panel =>
+    void BuildPowerSection() => AddSection("Питание", "\uE7E8", panel =>
     {
         panel.Children.Add(Ui.Header("Гасить подсветку"));
         panel.Children.Add(Ui.Check("при выходе из программы", _scene.OffOnExit, v => { _scene.OffOnExit = v; Touch(); }));
@@ -448,7 +504,7 @@ public sealed partial class MainWindow : Window
                                    "теми, кто дёрнул шину в этот момент."));
     });
 
-    void BuildAboutTab() => AddTab("О программе", panel =>
+    void BuildAboutSection() => AddSection("О программе", "\uE897", panel =>
     {
         panel.Children.Add(Ui.Header("CaseLight " + AppVersion));
 
@@ -515,7 +571,7 @@ public sealed partial class MainWindow : Window
         _scene.CopyFrom(_saved);
 
         _view.Select(null);
-        RebuildTabs();
+        RebuildSections();
         SyncFixtureList();
         _painter.Invalidate();
         _view.InvalidateVisual();
@@ -554,7 +610,7 @@ public sealed partial class MainWindow : Window
             _scene.CopyFrom(loaded);
 
             _view.Select(null);
-            RebuildTabs();
+            RebuildSections();
             SyncFixtureList();
             _painter.Invalidate();
             _view.FitToContent();

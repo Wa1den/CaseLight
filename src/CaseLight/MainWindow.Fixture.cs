@@ -335,7 +335,7 @@ public sealed partial class MainWindow
 
     // ---- вкладка цветов и тест размещения ---------------------------------
 
-    void BuildColorsTab() => AddTab("Цвета", panel =>
+    void BuildColorsSection() => AddSection("Цвета", "", panel =>
     {
         panel.Children.Add(Ui.Header("Как берётся цвет"));
         panel.Children.Add(Ui.Num("Область выборки, мм", _scene.SampleRadiusMm, v => { _scene.SampleRadiusMm = Math.Max(1, v); Touch(); }));
