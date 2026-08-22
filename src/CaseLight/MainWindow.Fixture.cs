@@ -330,10 +330,6 @@ public sealed partial class MainWindow
 
     void BuildColorsSection() => AddSection("Цвета", "\uE790", panel =>
     {
-        panel.Children.Add(Ui.Header("Как берётся цвет"));
-        panel.Children.Add(Ui.Num("Область выборки, мм", _scene.SampleRadiusMm, v => { _scene.SampleRadiusMm = Math.Max(1, v); Touch(); },
-            "Размер участка экрана, усредняемого для одного диода. При малом значении цвет меняется от любого движения в кадре, при большом усредняется до однородного оттенка."));
-
         panel.Children.Add(Ui.Header("Коррекция"));
         panel.Children.Add(Ui.Slide("Яркость", _scene.Brightness, 0, 1, 0.01, v => { _scene.Brightness = v; Touch(); }));
         panel.Children.Add(Ui.Slide("Насыщенность", _scene.Saturation, 0, 3, 0.05, v => { _scene.Saturation = v; Touch(); }));
@@ -352,12 +348,21 @@ public sealed partial class MainWindow
             "Больше значение — быстрее переход. Привычнее выглядит быстрое нарастание и плавный спад."));
         panel.Children.Add(Ui.Slide("Разгорается", _scene.SmoothingRise, 0.01, 1, 0.01, v => { _scene.SmoothingRise = v; Touch(); }));
         panel.Children.Add(Ui.Slide("Гаснет", _scene.SmoothingFall, 0.01, 1, 0.01, v => { _scene.SmoothingFall = v; Touch(); }));
+    });
 
+    /// <summary>
+    /// The placement test, in a section of its own.
+    ///
+    /// It shares nothing with the colour settings except the pipeline it feeds: the point
+    /// here is which fixture lights up, not what shade it lights up in.
+    /// </summary>
+    void BuildTestSection() => AddSection("Тест размещения", "\uE890", panel =>
+    {
         panel.Children.Add(Ui.Header("Тест размещения",
             "Вместо кадра экрана используется одно пятно, которое перемещается мышью по холсту. Вне пятна цвет чёрный, внутри — выбранный, " +
             "проходящий через те же настройки. Так проверяется, что загорается именно то устройство, около которого стоит пятно."));
 
-        _testButton = Ui.Btn(_painter.TestActive ? "Завершить тест" : "Запустить тест", ToggleTest);
+        _testButton = Ui.Btn(_painter.TestActive ? "Завершить тест" : "Запустить тест", ToggleTest, accent: true);
         panel.Children.Add(Ui.Row(_testButton));
 
         var shapeBox = new ComboBox { Margin = new Thickness(0, 2, 0, 8) };

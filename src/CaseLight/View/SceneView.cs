@@ -333,9 +333,15 @@ public sealed class SceneView : FrameworkElement
         }
     }
 
+    /// <summary>
+    /// Panning, on the middle button and on the right one.
+    ///
+    /// The right button has nothing else to do on this canvas - there is no context menu -
+    /// and not every mouse has a comfortable middle click.
+    /// </summary>
     protected override void OnMouseDown(MouseButtonEventArgs e)
     {
-        if (e.ChangedButton is MouseButton.Middle)
+        if (e.ChangedButton is MouseButton.Middle or MouseButton.Right)
         {
             _drag = Drag.Pan;
             _dragStart = e.GetPosition(this);

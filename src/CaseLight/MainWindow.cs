@@ -218,7 +218,9 @@ public sealed partial class MainWindow : Window
         var right = new Grid { Margin = new Thickness(0, 12, 12, 12) };
         right.Children.Add(_view);
 
-        _fixturePanel = new StackPanel();
+        // The Fluent scroll bar is drawn over the content instead of taking a column of
+        // its own, so the panel keeps a margin wide enough for it to land on.
+        _fixturePanel = new StackPanel { Margin = new Thickness(0, 0, 14, 0) };
         _fixtureOverlay = Ui.Card(new ScrollViewer
         {
             Content = _fixturePanel,
@@ -339,6 +341,7 @@ public sealed partial class MainWindow : Window
         BuildDevicesSection();
         BuildCaptureSection();
         BuildColorsSection();
+        BuildTestSection();
         BuildPowerSection();
         BuildAboutSection();
 
@@ -469,6 +472,9 @@ public sealed partial class MainWindow : Window
 
         panel.Children.Add(Ui.Slide("Кадров в секунду", _scene.MaxFps, 1, 120, 1, v => { _scene.MaxFps = (int)v; Touch(); }, "",
             "Верхний предел для быстрых устройств. Медленным задаётся свой делитель в параметрах фигуры."));
+
+        panel.Children.Add(Ui.Num("Область выборки, мм", _scene.SampleRadiusMm, v => { _scene.SampleRadiusMm = Math.Max(1, v); Touch(); },
+            "Размер участка экрана, усредняемого для одного диода. При малом значении цвет меняется от любого движения в кадре, при большом усредняется до однородного оттенка."));
 
         panel.Children.Add(Ui.Header("Статистика"));
         _captureStats = Ui.Mono();
