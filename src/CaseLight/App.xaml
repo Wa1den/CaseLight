@@ -1,0 +1,25 @@
+<Application x:Class="CaseLight.App"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             ThemeMode="System">
+    <Application.Resources>
+        <!-- Semantic aliases over the Fluent theme colour tokens. DynamicResource on the
+             Colour is what makes them follow the system light/dark switch at runtime: the
+             brush objects are shared by every control, so their colour changes underneath. -->
+        <SolidColorBrush x:Key="Fg" Color="{DynamicResource TextFillColorPrimary}" />
+        <SolidColorBrush x:Key="FgDim" Color="{DynamicResource TextFillColorSecondary}" />
+        <SolidColorBrush x:Key="Warn" Color="{DynamicResource SystemFillColorCaution}" />
+        <SolidColorBrush x:Key="Panel" Color="{DynamicResource CardBackgroundFillColorDefault}" />
+        <SolidColorBrush x:Key="PanelStroke" Color="{DynamicResource CardStrokeColorDefault}" />
+
+        <FontFamily x:Key="Icons">Segoe Fluent Icons,Segoe MDL2 Assets</FontFamily>
+
+        <Style x:Key="Card" TargetType="Border">
+            <Setter Property="Background" Value="{StaticResource Panel}" />
+            <Setter Property="BorderBrush" Value="{StaticResource PanelStroke}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="8" />
+            <Setter Property="Padding" Value="16" />
+        </Style>
+    </Application.Resources>
+</Application>

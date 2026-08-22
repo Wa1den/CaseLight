@@ -67,7 +67,6 @@ public sealed partial class MainWindow : Window
     public MainWindow()
     {
         Title = "CaseLight — подсветка корпуса";
-        Background = Ui.Bg;
 
         ProbeLog.Configure(Scene.LogPath, _scene.WriteLog);
         CaseLight.Core.Text.Loc.Configure(System.IO.Path.Combine(Scene.Folder, "lang"));
@@ -148,7 +147,7 @@ public sealed partial class MainWindow : Window
         left.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
         left.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
 
-        _tabs = new TabControl { Background = Ui.Bg, BorderBrush = new SolidColorBrush(Color.FromRgb(58, 58, 66)) };
+        _tabs = new TabControl();
 
         // The fixture panel belongs to one tab only; leaving it hanging over the canvas
         // while looking at, say, power settings is just clutter.
