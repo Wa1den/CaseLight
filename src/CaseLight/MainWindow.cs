@@ -64,7 +64,20 @@ public sealed partial class MainWindow : Window
     bool _wokeUp;
 
     /// <summary>Throttles re-reading the list while the server is still detecting.</summary>
-    long _lastEmptyRefresh;
+    long _lastListPoll;
+
+    /// <summary>
+    /// How many more times the controller list is re-read before it is believed.
+    ///
+    /// The port opens before detection has finished, and the list arrives in pieces - the
+    /// memory on the SMBus turned up first here, the rest several seconds later. Trusting
+    /// the first non-empty list is how a layout ends up bound to one controller out of
+    /// three, with every other fixture reporting that its device is not visible.
+    /// </summary>
+    int _settlePolls;
+
+    /// <summary>Reads without a change after which the list is taken as final.</summary>
+    const int SettlePolls = 4;
 
     /// <summary>
     /// Recovery owns the hub while it runs.
@@ -894,28 +907,7 @@ public sealed partial class MainWindow : Window
 
     void RefreshUi()
     {
-        // Reconnect on its own: after a launch the port appears only once detection is
-        // finished, and the server also dies by itself often enough that waiting for the
-        // user to press a button is not reasonable. Connect() throttles its own retries.
-        if (!_hub.IsReady && !_recovering)
-        {
-            if (!_hub.IsConnected)
-            {
-                if (_hub.Connect()) { Say(_hub.Status); BuildFixturePanel(); }
-                else if (_serverStartedTicks > 0 && Environment.TickCount64 - _serverStartedTicks < OpenRgbLauncher.TypicalStartupMs)
-                    Say("OpenRGB запускается, идёт поиск устройств.");
-            }
-            else if (Environment.TickCount64 - _lastEmptyRefresh > 2000)
-            {
-                // Connected but empty: detection is still running on the other side. Ask
-                // again instead of reconnecting - remaking the connection is what crashes it.
-                _lastEmptyRefresh = Environment.TickCount64;
-                _hub.Refresh();
-
-                if (_hub.IsReady) { Say(_hub.Status); BuildFixturePanel(); }
-                else Say("OpenRGB подключён, устройств пока нет: идёт поиск.");
-            }
-        }
+        PollDevices();
 
         if (_painter.IsRunning) Say(_painter.Status);
 
@@ -970,6 +962,69 @@ public sealed partial class MainWindow : Window
     /// <summary>Which bus screen has already been taken, so it is measured once.</summary>
     string _adoptedBusScreen = "";
 
+    /// <summary>
+    /// Keeps the controller list current: connects when there is no connection, and keeps
+    /// re-reading the list until it stops changing.
+    ///
+    /// Reconnecting is left to the tick rather than to the user: after a launch the port
+    /// appears only once detection is finished, and the server dies by itself often enough
+    /// that waiting for a button press is not reasonable. Connect() throttles its own
+    /// retries. Re-reading is deliberately not a reconnect - remaking the connection is
+    /// what crashes this server.
+    /// </summary>
+    void PollDevices()
+    {
+        if (_recovering) return;
+
+        long now = Environment.TickCount64;
+
+        if (!_hub.IsConnected)
+        {
+            if (_hub.Connect())
+            {
+                _settlePolls = SettlePolls;
+                Say(_hub.Status);
+                BuildFixturePanel();
+            }
+            else if (_serverStartedTicks > 0 && now - _serverStartedTicks < OpenRgbLauncher.TypicalStartupMs)
+            {
+                Say("OpenRGB запускается, идёт поиск устройств.");
+            }
+            return;
+        }
+
+        // the server announces changes of its own accord; this is free when nothing moved
+        if (_hub.RefreshIfStale())
+        {
+            _settlePolls = SettlePolls;
+            BuildFixturePanel();
+            _painter.Invalidate();
+        }
+
+        if (_settlePolls <= 0 || now - _lastListPoll < 2500) return;
+        _lastListPoll = now;
+
+        int before = _hub.Devices.Length;
+        _hub.Refresh();
+
+        if (_hub.Devices.Length != before)
+        {
+            // still filling up - start the count again rather than settle on a partial list
+            _settlePolls = SettlePolls;
+            Say(_hub.Status);
+            BuildFixturePanel();
+            _painter.Invalidate();
+        }
+        else if (_hub.Devices.Length == 0)
+        {
+            Say("OpenRGB подключён, устройств пока нет: идёт поиск.");
+        }
+        else
+        {
+            _settlePolls--;
+        }
+    }
+
     void Say(string text) => _status.Text = text;
 
     // ---- запуск -----------------------------------------------------------
@@ -980,6 +1035,7 @@ public sealed partial class MainWindow : Window
 
         EnsureServer();
         _hub.Connect(force: true);
+        _settlePolls = SettlePolls;
         Say(_hub.Status);
         BuildFixturePanel();
     }
@@ -1022,15 +1078,26 @@ public sealed partial class MainWindow : Window
     /// </summary>
     bool WaitForDevices(int attempts = 90)
     {
+        int last = -1, stable = 0;
+
         for (int i = 0; i < attempts; i++)
         {
             if (!_hub.IsConnected) _hub.Connect(force: true);
             else _hub.Refresh();
 
-            if (_hub.IsReady) return true;
+            int count = _hub.Devices.Length;
+
+            // Not "any device", but "the same devices twice running": detection hands the
+            // list over in pieces, and returning at the first one binds the layout to
+            // whatever happened to be found first.
+            stable = count > 0 && count == last ? stable + 1 : 0;
+            last = count;
+
+            if (stable >= 2) return true;
             System.Threading.Thread.Sleep(500);
         }
-        return false;
+
+        return _hub.IsReady;
     }
 
     /// <summary>The same recovery, on demand - useful when sleep is not the cause.</summary>

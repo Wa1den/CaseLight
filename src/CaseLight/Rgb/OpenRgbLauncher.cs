@@ -88,6 +88,20 @@ public static class OpenRgbLauncher
         var processes = Process.GetProcessesByName("OpenRGB");
         if (processes.Length == 0) return "OpenRGB не запущен";
 
+        // A server the task started runs elevated, and nothing below it can close it: the
+        // window message is dropped and Kill answers "access denied". The scheduler can,
+        // so it gets asked first and the manual path is left for a server started by hand.
+        if (OpenRgbTask.Exists() && OpenRgbTask.TryStop())
+        {
+            for (int i = 0; i < 25 && IsRunning(); i++) System.Threading.Thread.Sleep(200);
+
+            if (!IsRunning())
+            {
+                ProbeLog.Log("OpenRGB", "остановлен заданием планировщика");
+                return "OpenRGB остановлен";
+            }
+        }
+
         foreach (var p in processes)
         {
             try

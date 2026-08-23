@@ -92,7 +92,8 @@ public sealed class RgbHub : IDisposable
                 _client = new OpenRgbClient(name: "CaseLight");
                 _client.DeviceListUpdated += (_, _) => _listStale = true;
                 _listStale = false;
-                Refresh();
+                _directMode.Clear();
+                RefreshLocked();
             }
         }
         catch (Exception ex)
@@ -108,15 +109,49 @@ public sealed class RgbHub : IDisposable
         return true;
     }
 
-    /// <summary>Re-reads the controller list; call after anything that could renumber it.</summary>
+    /// <summary>
+    /// Re-reads the controller list; call after anything that could renumber it.
+    ///
+    /// Never throws. The server closes the socket when it dies, and it dies on its own
+    /// often enough that this is an ordinary event - but the call sits on the interface
+    /// timer, where an escaping exception ends the process. One was collected the hard
+    /// way: SocketException 10054 out of SendAll, and the whole program went with it.
+    /// </summary>
     public void Refresh()
     {
-        lock (_io)
+        try
         {
-            if (_client == null) return;
-            RefreshLocked();
+            lock (_io)
+            {
+                if (_client == null) return;
+                RefreshLocked();
+            }
+        }
+        catch (Exception ex)
+        {
+            Status = "связь потеряна: " + ex.Message;
+
+            lock (_io)
+            {
+                try { _client?.Dispose(); } catch { /* уже мёртв */ }
+                _client = null;
+            }
+
+            _devices = Array.Empty<Device>();
+            Devices = Array.Empty<DeviceInfo>();
+            _directMode.Clear();
+            Generation++;
         }
     }
+
+    /// <summary>
+    /// Which devices have already been put into direct mode on this connection.
+    ///
+    /// Re-sending it on every read was hammering the server exactly while it was still
+    /// finding hardware, which is its most fragile moment. A device needs the mode once,
+    /// when it appears; a reconnect empties this and the whole list gets it again.
+    /// </summary>
+    readonly HashSet<string> _directMode = new();
 
     void RefreshLocked()
     {
@@ -144,10 +179,19 @@ public sealed class RgbHub : IDisposable
         Devices = list.ToArray();
         Generation++;
 
+        // Status is what the window shows, and it used to be written only when the
+        // connection was made - so a list that filled up afterwards left the line saying
+        // "0 controllers" over a case that was lit and working.
+        Status = $"подключено, контроллеров с диодами: {Devices.Length}";
+
         // Per-LED control has to be re-established after every reconnect: a restarted
-        // server brings its devices back in whatever mode they defaulted to.
+        // server brings its devices back in whatever mode they defaulted to. Only devices
+        // that have not had it yet are touched - see _directMode.
         foreach (var info in Devices)
         {
+            string key = info.Index + "|" + info.Name + "|" + info.Location;
+            if (!_directMode.Add(key)) continue;
+
             try { _client.SetCustomMode(info.Index); }
             catch { /* одно упрямое устройство не должно ронять остальные */ }
         }
@@ -416,6 +460,7 @@ public sealed class RgbHub : IDisposable
         // stale names in the interface are worse than an honest empty list
         _devices = Array.Empty<Device>();
         Devices = Array.Empty<DeviceInfo>();
+        _directMode.Clear();
         Generation++;
     }
 }

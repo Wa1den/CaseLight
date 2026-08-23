@@ -179,6 +179,32 @@ public static class OpenRgbTask
         }
     }
 
+    /// <summary>
+    /// Ends the server through the task, which is the only way we have of stopping it.
+    ///
+    /// A server started by the task runs elevated, and this program deliberately does not.
+    /// From below, a window message is dropped by the integrity check and Kill comes back
+    /// with access denied - both were measured, not guessed. The scheduler ends the task in
+    /// its own security context, so it needs no rights from us.
+    /// </summary>
+    public static bool TryStop()
+    {
+        try
+        {
+            if (!Exists()) return false;
+
+            int code = Run("schtasks", $"/end /tn \"{TaskName}\"", out string output);
+            bool ok = code == 0;
+
+            ProbeLog.Log("планировщик", ok ? "сервер остановлен заданием" : "остановка заданием не удалась: " + output.Trim());
+            return ok;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
     static int Run(string file, string args, out string output)
     {
         var info = new ProcessStartInfo
