@@ -198,13 +198,24 @@ public static class Ui
         return Labelled(label, box, help);
     }
 
-    public static UIElement Check(string label, bool value, Action<bool> set, string? help = null)
+    /// <summary>
+    /// A checkbox, optionally greyed out.
+    ///
+    /// Only the box itself is disabled, never the row: the explanation glyph beside it has
+    /// to stay usable, since a setting that cannot be switched on is exactly the one whose
+    /// reason someone wants to read.
+    ///
+    /// The foreground is left to the theme on purpose. Setting it here would win over the
+    /// disabled state and the box would look available while refusing to be clicked.
+    /// </summary>
+    public static UIElement Check(string label, bool value, Action<bool> set, string? help = null,
+                                  bool enabled = true)
     {
         var box = new CheckBox
         {
             Content = label,
             IsChecked = value,
-            Foreground = Fg,
+            IsEnabled = enabled,
             FontSize = TextSize,
             Margin = new Thickness(0, 5, 0, 3),
 

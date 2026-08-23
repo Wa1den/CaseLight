@@ -141,14 +141,22 @@ public sealed class SceneView : FrameworkElement
         DrawMonitor(dc);
 
         foreach (var f in Scene.Fixtures)
-        {
-            if (!f.Enabled && !Scene.ShowDisabled && f != Selected) continue;
-            DrawFixture(dc, f, f == Selected);
-        }
+            if (IsOnCanvas(f))
+                DrawFixture(dc, f, f == Selected);
 
         if (Selected != null && !TestMode) DrawHandles(dc, Selected);
         if (TestMode) DrawTestPatch(dc);
     }
+
+    /// <summary>
+    /// Whether a fixture is on the canvas at all.
+    ///
+    /// Drawing and hit testing ask the same question, and they have to give the same
+    /// answer: a hidden fixture that still catches the mouse where it used to be is worse
+    /// than one that cannot be found, because nothing on screen explains what was clicked.
+    /// The selected one is always drawn, so it is always clickable too.
+    /// </summary>
+    bool IsOnCanvas(Fixture f) => f.Enabled || Scene.ShowDisabled || f == Selected;
 
     void DrawTestPatch(DrawingContext dc)
     {
@@ -337,8 +345,9 @@ public sealed class SceneView : FrameworkElement
 
         var scene = ToScene(px);
 
-        // topmost first, so overlapping fixtures pick the one drawn last
-        var hit = Scene.Fixtures.LastOrDefault(f => LedGeometry.HitTest(f, scene));
+        // topmost first, so overlapping fixtures pick the one drawn last; hidden ones are
+        // reachable from the list and only from there
+        var hit = Scene.Fixtures.LastOrDefault(f => IsOnCanvas(f) && LedGeometry.HitTest(f, scene));
         Select(hit);
 
         if (hit != null)

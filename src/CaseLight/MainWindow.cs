@@ -413,13 +413,13 @@ public sealed partial class MainWindow : Window
         panel.Children.Add(Ui.Header("Сервер OpenRGB"));
         panel.Children.Add(Ui.Check("Запускать OpenRGB, если он не запущен", _scene.AutoStartOpenRgb, v => { _scene.AutoStartOpenRgb = v; Touch(); },
             "Сервер запускается с ключами --server --startminimized: первый открывает порт 6742, второй убирает окно."));
-        panel.Children.Add(Ui.Check("Запускать от администратора", _scene.OpenRgbAsAdmin, v => { _scene.OpenRgbAsAdmin = v; Touch(); },
-            "Права требуются для оперативной памяти: она на шине SMBus, и без прав OpenRGB её вовсе не находит — модули остаются в своём режиме и после перезагрузки светят радугой. " +
-            "Запуск отсюда спрашивает UAC каждый раз; чтобы этого не было, есть задание в планировщике ниже."));
+        panel.Children.Add(Ui.Check("Запускать от администратора с запросом", _scene.OpenRgbAsAdmin, SetRunAsAdmin,
+            "Права администратора нужны OpenRGB для доступа к шине SMBus, через которую управляется оперативная память. " +
+            "При каждом запуске сервера будет запрос UAC."));
 
-        panel.Children.Add(Ui.Check("Запускать при входе от администратора", OpenRgbTask.Exists(), SetLogonTask,
-            "Задание в планировщике: сервер стартует при входе в систему сразу с правами, и UAC больше не появляется. " +
-            "Запрос прав будет один раз, при создании задания. Повышается только сервер OpenRGB, само приложение работает без прав."));
+        panel.Children.Add(Ui.Check("Запускать от администратора автоматически", OpenRgbTask.Exists(), SetLogonTask,
+            "Создаёт задание в планировщике Windows для автоматического запуска OpenRGB от администратора, с однократным подтверждением.",
+            enabled: _scene.OpenRgbAsAdmin));
 
         // Shown, not stored: the setting stays empty so the search runs again if OpenRGB
         // ever moves, while the field says which file that search lands on today.
@@ -680,6 +680,25 @@ public sealed partial class MainWindow : Window
         panel.Children.Add(Ui.Link("Rimlight, подсветка монитора:", "https://github.com/Wa1den/Rimlight"));
         panel.Children.Add(Ui.Link("OpenRGB:", "https://openrgb.org"));
     });
+
+    /// <summary>
+    /// The two ways of getting the server its rights, of which this is the first.
+    ///
+    /// Switching it off takes the second one with it: a logon task that starts the server
+    /// elevated is precisely "run as administrator", so leaving it registered would keep
+    /// doing the thing that was just switched off.
+    /// </summary>
+    void SetRunAsAdmin(bool enabled)
+    {
+        if (_rebuildingUi) return;
+
+        _scene.OpenRgbAsAdmin = enabled;
+
+        if (!enabled && OpenRgbTask.Exists()) Say(OpenRgbTask.Delete());
+
+        Touch();
+        RebuildSections();
+    }
 
     /// <summary>
     /// Registers or removes the logon task, then rebuilds the page from what actually
