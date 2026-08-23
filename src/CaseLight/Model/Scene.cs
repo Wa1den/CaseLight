@@ -200,12 +200,17 @@ public sealed class Scene
     public bool OffOnSuspend { get; set; } = true;
 
     /// <summary>
-    /// How long to wait after a wake before writing to the hardware again.
+    /// How long to leave the hardware alone after a wake.
     ///
-    /// Not politeness: OpenRGB was seen dying 41 seconds after a resume with an access
-    /// violation, because its USB devices are re-enumerated while it still holds the old
-    /// handles. Letting the bus settle first is the cheapest way not to be the one poking
-    /// it at that moment.
+    /// It began as a guard for our own writes: OpenRGB was seen dying 41 seconds after a
+    /// resume with an access violation, because its USB devices are re-enumerated while it
+    /// still holds the old handles. With the server now restarted rather than kept, that
+    /// job has moved - the pause holds the restart back instead, because a server that
+    /// goes looking for hardware over a bus that is still settling comes back with half a
+    /// device list, or does not come back at all.
+    ///
+    /// In <see cref="WakeRecovery.Nothing"/> it keeps its original meaning, since there
+    /// the old server carries on with the handles it had.
     /// </summary>
     public int ResumeDelayMs { get; set; } = 8000;
 
