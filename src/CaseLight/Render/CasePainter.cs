@@ -76,6 +76,17 @@ public sealed class CasePainter : IDisposable
     /// <summary>Nothing is written to the hardware until this moment passes.</summary>
     long _holdUntilTicks;
 
+    /// <summary>
+    /// Asks the paint thread to forget the colours it was smoothing towards.
+    ///
+    /// A flag rather than the call itself: resuming happens on the interface thread, and
+    /// resetting the pipeline from there rewrites the smoothing buffers underneath the
+    /// paint loop that is reading them. Sizes change during a rebuild, so the loop could
+    /// walk off the end of an array - and an exception there stops the painting for good,
+    /// which looks exactly like "it reconnected but never started again".
+    /// </summary>
+    volatile bool _resetPipeline;
+
     /// <summary>Reference assignment is atomic, so the UI can swap this in at any moment.</summary>
     volatile TestPatch? _test;
 
@@ -178,7 +189,7 @@ public sealed class CasePainter : IDisposable
         _paused = false;
         _pauseReason = "";
         _holdUntilTicks = Environment.TickCount64 + Math.Max(0, delayMs);
-        _pipeline.Reset(_zones.Length);   // не разгораться из устаревших цветов
+        _resetPipeline = true;            // не разгораться из устаревших цветов
     }
 
     void Loop()
@@ -190,6 +201,10 @@ public sealed class CasePainter : IDisposable
             // painting is bad; losing an unsaved layout with it is worse.
             _running = false;
             Status = "раскраска аварийно остановлена: " + ex.Message;
+
+            // Written down as well: the window shows the last line only until something
+            // else is said, and a painting that died quietly is the hardest kind to explain.
+            ProbeLog.Log("раскраска", "аварийно остановлена: " + ex);
         }
     }
 
@@ -217,6 +232,12 @@ public sealed class CasePainter : IDisposable
                 Status = $"ожидание готовности устройств после сна: {hold / 1000.0:F0} с";
                 Thread.Sleep(Math.Min(500, (int)hold));
                 continue;
+            }
+
+            if (_resetPipeline)
+            {
+                _resetPipeline = false;
+                _pipeline.Reset(_zones.Length);
             }
 
             // Между кадрами, а не внутри: перечитывание меняет длины буферов.

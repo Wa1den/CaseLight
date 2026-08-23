@@ -50,6 +50,16 @@ public sealed partial class MainWindow : Window
     bool _syncingList;
 
     /// <summary>
+    /// Whether painting is meant to be on, as opposed to whether the thread happens to be
+    /// alive right now.
+    ///
+    /// Recovery used to restart the painting only if the thread was running when it began.
+    /// If the painting had already died - the server took it down with it - the restart
+    /// brought the connection back and left the case dark until someone pressed Start.
+    /// </summary>
+    bool _paintingWanted;
+
+    /// <summary>
     /// Set only by the ways out that really mean it: the tray menu and a Windows shutdown.
     ///
     /// With the tray enabled the close button hides the window instead of ending the
@@ -833,11 +843,10 @@ public sealed partial class MainWindow : Window
             return;
         }
 
-        bool wasPainting = _painter.IsRunning;
         _recovering = true;
 
-        // Stop writing before touching the server: a rescan with an active client is what
-        // crashed it by hand, and a restart would be writing into a dying process.
+        // Stop writing before touching the server: a restart would be writing into a dying
+        // process.
         _painter.Pause("восстановление после сна");
         Say("Пробуждение: восстановление связи с OpenRGB.");
 
@@ -878,7 +887,7 @@ public sealed partial class MainWindow : Window
                 BuildFixturePanel();
 
                 _painter.Resume(0);
-                if (wasPainting && !_painter.IsRunning) _painter.Start();
+                if (_paintingWanted && !_painter.IsRunning) _painter.Start();
             });
         });
     }
@@ -1091,6 +1100,7 @@ public sealed partial class MainWindow : Window
 
         _painter.UseScene(_scene);
         _painter.Start();
+        _paintingWanted = true;
         Say("Раскраска запущена.");
     }
 
@@ -1129,7 +1139,6 @@ public sealed partial class MainWindow : Window
     /// <summary>The same recovery, on demand - useful when sleep is not the cause.</summary>
     void RestartServerNow()
     {
-        bool wasPainting = _painter.IsRunning;
         _recovering = true;
         _painter.Pause("перезапуск OpenRGB");
         Say("Перезапуск OpenRGB.");
@@ -1159,13 +1168,14 @@ public sealed partial class MainWindow : Window
                 BuildFixturePanel();
 
                 _painter.Resume(0);
-                if (wasPainting && !_painter.IsRunning) _painter.Start();
+                if (_paintingWanted && !_painter.IsRunning) _painter.Start();
             });
         });
     }
 
     void StopPainting()
     {
+        _paintingWanted = false;
         StopTest();
         _painter.Stop();
         Say("Раскраска остановлена, подсветка погашена.");

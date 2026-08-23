@@ -466,6 +466,9 @@ public sealed partial class MainWindow
     {
         if (!_view.TestMode && !_painter.TestActive) return;
 
+        // The test drives the painter too, but nobody wants it brought back by a recovery
+        _paintingWanted = false;
+
         _view.TestMode = false;
         _view.InvalidateVisual();
 
