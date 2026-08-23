@@ -67,6 +67,9 @@ public sealed class CasePainter : IDisposable
     int _resolvedGeneration = -1;
     long _frameNo;
 
+    /// <summary>Set by a rebuild: the devices outside the layout need their default wiped.</summary>
+    bool _blankUnused;
+
     volatile bool _paused;
     string _pauseReason = "";
 
@@ -239,6 +242,12 @@ public sealed class CasePainter : IDisposable
                 Status = _hub.Status;
                 Thread.Sleep(500);
                 continue;
+            }
+
+            if (_blankUnused)
+            {
+                _blankUnused = false;
+                _hub.BlackoutOthers(_deviceDivider.Keys);
             }
 
             var test = _test;
@@ -546,6 +555,7 @@ public sealed class CasePainter : IDisposable
         _output = new byte[_zones.Length * 3];
         _pipeline.Reset(_zones.Length);
         _resolvedGeneration = _hub.Generation;
+        _blankUnused = true;
     }
 
     public void Dispose()

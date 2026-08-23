@@ -391,7 +391,12 @@ public sealed partial class MainWindow : Window
         panel.Children.Add(Ui.Check("Запускать OpenRGB, если он не запущен", _scene.AutoStartOpenRgb, v => { _scene.AutoStartOpenRgb = v; Touch(); },
             "Сервер запускается с ключами --server --startminimized: первый открывает порт 6742, второй убирает окно."));
         panel.Children.Add(Ui.Check("Запускать от администратора", _scene.OpenRgbAsAdmin, v => { _scene.OpenRgbAsAdmin = v; Touch(); },
-            "Права требуются только для оперативной памяти: она на шине SMBus. Устройства на ARGB-контроллере доступны без них, и тогда UAC при каждом входе не запрашивается."));
+            "Права требуются для оперативной памяти: она на шине SMBus, и без прав OpenRGB её вовсе не находит — модули остаются в своём режиме и после перезагрузки светят радугой. " +
+            "Запуск отсюда спрашивает UAC каждый раз; чтобы этого не было, есть задание в планировщике ниже."));
+
+        panel.Children.Add(Ui.Check("Запускать при входе от администратора", OpenRgbTask.Exists(), SetLogonTask,
+            "Задание в планировщике: сервер стартует при входе в систему сразу с правами, и UAC больше не появляется. " +
+            "Запрос прав будет один раз, при создании задания. Повышается только сервер OpenRGB, само приложение работает без прав."));
 
         // Shown, not stored: the setting stays empty so the search runs again if OpenRGB
         // ever moves, while the field says which file that search lands on today.
@@ -643,6 +648,22 @@ public sealed partial class MainWindow : Window
         panel.Children.Add(Ui.Link("Rimlight, подсветка монитора:", "https://github.com/Wa1den/Rimlight"));
         panel.Children.Add(Ui.Link("OpenRGB:", "https://openrgb.org"));
     });
+
+    /// <summary>
+    /// Registers or removes the logon task, then rebuilds the page from what actually
+    /// happened - the prompt can be declined, and the checkbox must not claim otherwise.
+    /// </summary>
+    void SetLogonTask(bool enabled)
+    {
+        if (_rebuildingUi) return;
+
+        string path = string.IsNullOrWhiteSpace(_scene.OpenRgbPath)
+            ? OpenRgbLauncher.FindExe() ?? ""
+            : _scene.OpenRgbPath;
+
+        Say(enabled ? OpenRgbTask.Create(path) : OpenRgbTask.Delete());
+        RebuildSections();
+    }
 
     /// <summary>Version from the assembly, so it can only be changed in one place.</summary>
     static string AppVersion

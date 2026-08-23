@@ -128,6 +128,12 @@ public static class OpenRgbLauncher
     {
         if (IsRunning()) return "OpenRGB уже запущен";
 
+        // The scheduled task, when there is one, starts the server with the rights the
+        // SMBus needs and without a prompt. Starting it by hand here would either lose
+        // those rights or ask for them again.
+        if (OpenRgbTask.Exists() && OpenRgbTask.TryStart())
+            return "OpenRGB запущен заданием планировщика, идёт поиск устройств";
+
         exePath ??= FindExe();
         if (exePath == null || !File.Exists(exePath))
             return "OpenRGB.exe не найден, укажите путь вручную";

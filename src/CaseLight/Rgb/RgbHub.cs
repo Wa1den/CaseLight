@@ -369,6 +369,42 @@ public sealed class RgbHub : IDisposable
         EndFrame();
     }
 
+    /// <summary>
+    /// Writes black to every device no fixture drives.
+    ///
+    /// After a cold boot the controllers come up in whatever mode they ship with, and that
+    /// is usually a rainbow. Direct mode alone does not clear it - the previous frame stays
+    /// on the LEDs until something writes over it - so a device left out of the layout
+    /// would keep flowing through its factory effect beside a case that follows the screen.
+    /// </summary>
+    public bool BlackoutOthers(IReadOnlyCollection<int> driven)
+    {
+        try
+        {
+            lock (_io)
+            {
+                if (_client == null) return false;
+
+                foreach (var info in Devices)
+                {
+                    if (driven.Contains(info.Index)) continue;
+
+                    var colors = new Color[info.LedCount];
+                    for (int i = 0; i < colors.Length; i++) colors[i] = new Color(0, 0, 0);
+
+                    _client.UpdateLeds(info.Index, colors);
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Status = "связь потеряна: " + ex.Message;
+            return false;
+        }
+
+        return true;
+    }
+
     public void Dispose()
     {
         lock (_io)
