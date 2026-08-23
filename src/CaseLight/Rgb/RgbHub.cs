@@ -129,19 +129,51 @@ public sealed class RgbHub : IDisposable
         }
         catch (Exception ex)
         {
-            Status = "связь потеряна: " + ex.Message;
-
-            lock (_io)
-            {
-                try { _client?.Dispose(); } catch { /* уже мёртв */ }
-                _client = null;
-            }
-
-            _devices = Array.Empty<Device>();
-            Devices = Array.Empty<DeviceInfo>();
-            _directMode.Clear();
-            Generation++;
+            lock (_io) DropClient(ex);
         }
+    }
+
+    /// <summary>
+    /// Re-reads the list, but only if the socket is free at this moment.
+    ///
+    /// The paint thread holds the same lock while it writes, and this runs on the interface
+    /// timer: waiting behind a dying server would freeze the window. A missed read costs
+    /// nothing, the next tick tries again.
+    /// </summary>
+    public bool TryRefresh(int waitMs = 50)
+    {
+        if (_client == null) return false;
+        if (!System.Threading.Monitor.TryEnter(_io, waitMs)) return false;
+
+        try
+        {
+            if (_client == null) return false;
+            RefreshLocked();
+            return true;
+        }
+        catch (Exception ex)
+        {
+            DropClient(ex);
+            return false;
+        }
+        finally
+        {
+            System.Threading.Monitor.Exit(_io);
+        }
+    }
+
+    /// <summary>Lets go of a connection that has stopped answering. Call under <c>_io</c>.</summary>
+    void DropClient(Exception ex)
+    {
+        Status = "связь потеряна: " + ex.Message;
+
+        try { _client?.Dispose(); } catch { /* уже мёртв */ }
+        _client = null;
+
+        _devices = Array.Empty<Device>();
+        Devices = Array.Empty<DeviceInfo>();
+        _directMode.Clear();
+        Generation++;
     }
 
     /// <summary>
@@ -201,9 +233,9 @@ public sealed class RgbHub : IDisposable
     /// Asks the server to look for hardware again, over a socket of our own.
     ///
     /// The client library has no such call, but the protocol does: a bare 16-byte header
-    /// with packet id 140. Worth trying before the blunt instrument of a restart - though
-    /// OpenRGB is known to fall over during a rescan, so the caller should stop painting
-    /// first and be ready for the connection to die.
+    /// with packet id 140. Kept for the record rather than for use: on this machine the
+    /// request kills the server every time, and disconnecting first changes nothing, so
+    /// the recovery path restarts the server instead.
     /// </summary>
     public static string RequestRescan(string host = "127.0.0.1", int port = 6742)
     {

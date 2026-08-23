@@ -622,19 +622,17 @@ public sealed partial class MainWindow : Window
 
         var wakeBox = new ComboBox { Margin = new Thickness(0, 2, 0, 8) };
         wakeBox.Items.Add("Ничего не делать");
-        wakeBox.Items.Add("Пересканировать устройства");
         wakeBox.Items.Add("Перезапустить OpenRGB");
-        wakeBox.SelectedIndex = (int)_scene.WakeRecovery;
+        wakeBox.SelectedIndex = Math.Max(0, Array.IndexOf(WakeModes, WakeMode));
         wakeBox.SelectionChanged += (_, _) =>
         {
             if (wakeBox.SelectedIndex < 0) return;
-            _scene.WakeRecovery = (WakeRecovery)wakeBox.SelectedIndex;
+            _scene.WakeRecovery = WakeModes[wakeBox.SelectedIndex];
             Touch();
         };
         panel.Children.Add(Ui.Labelled("Что делать", wakeBox,
             "Во сне контроллеры переподключаются к USB, а работавший сервер продолжает запись в прежние дескрипторы и возвращает признак успеха: " +
-            "подсветка при этом остаётся в состоянии, установленном при подаче питания. Перезапуск восстанавливает управление надёжнее. " +
-            "Пересканирование действует мягче, но иногда завершает сервер аварийно."));
+            "подсветка при этом остаётся в состоянии, установленном при подаче питания. Перезапуск возвращает управление."));
 
         panel.Children.Add(Ui.Row(Ui.Btn("Перезапустить OpenRGB сейчас", RestartServerNow)));
 
@@ -643,6 +641,16 @@ public sealed partial class MainWindow : Window
             "Первая запись после пробуждения откладывается на это время. По журналу Windows сервер завершался аварийно через 41 секунду после выхода из сна, " +
             "пока устройства переподключались, а он держал прежние дескрипторы."));
     });
+
+    /// <summary>
+    /// The recovery modes offered. Rescanning is not among them: the request kills the
+    /// server on this hardware, and with the restart no longer costing a rights prompt it
+    /// had nothing left to offer. Settings that still name it are read as a restart.
+    /// </summary>
+    static readonly WakeRecovery[] WakeModes = { WakeRecovery.Nothing, WakeRecovery.RestartServer };
+
+    WakeRecovery WakeMode =>
+        _scene.WakeRecovery == WakeRecovery.Rescan ? WakeRecovery.RestartServer : _scene.WakeRecovery;
 
     void BuildAboutSection() => AddSection("О программе", "\uE897", panel =>
     {
@@ -817,7 +825,7 @@ public sealed partial class MainWindow : Window
     /// </summary>
     void RecoverAfterWake()
     {
-        var mode = _scene.WakeRecovery;
+        var mode = WakeMode;
 
         if (mode == WakeRecovery.Nothing)
         {
@@ -835,24 +843,31 @@ public sealed partial class MainWindow : Window
 
         System.Threading.Tasks.Task.Run(() =>
         {
-            // let the USB stack finish re-enumerating before anything is asked of it
-            System.Threading.Thread.Sleep(Math.Max(2000, _scene.ResumeDelayMs));
+            string what = "";
+            bool back = false;
 
-            string what;
-            if (mode == WakeRecovery.Rescan)
+            try
             {
-                what = RgbHub.RequestRescan();
-                System.Threading.Thread.Sleep(6000);   // поиск устройств занимает секунды
-            }
-            else
-            {
-                _hub.Dispose();                        // клиента всё равно унесёт вместе с сервером
+                // let the USB stack finish re-enumerating before anything is asked of it
+                System.Threading.Thread.Sleep(Math.Max(2000, _scene.ResumeDelayMs));
+
+                // The connection goes first: a restart would otherwise be writing into a
+                // dying process.
+                _hub.Dispose();
+
                 what = OpenRgbLauncher.Restart(
                     string.IsNullOrWhiteSpace(_scene.OpenRgbPath) ? null : _scene.OpenRgbPath,
                     _scene.OpenRgbAsAdmin);
-            }
 
-            bool back = WaitForDevices();
+                back = WaitForDevices();
+            }
+            finally
+            {
+                // The flag comes down whatever happened. While it is up nothing reconnects
+                // on its own and the reconnect button refuses to work, so a recovery that
+                // ended badly used to leave the program deaf until it was restarted.
+                _recovering = false;
+            }
 
             Dispatcher.Invoke(() =>
             {
@@ -985,10 +1000,21 @@ public sealed partial class MainWindow : Window
                 _settlePolls = SettlePolls;
                 Say(_hub.Status);
                 BuildFixturePanel();
+                return;
             }
-            else if (_serverStartedTicks > 0 && now - _serverStartedTicks < OpenRgbLauncher.TypicalStartupMs)
+
+            if (_serverStartedTicks > 0 && now - _serverStartedTicks < OpenRgbLauncher.TypicalStartupMs)
             {
                 Say("OpenRGB запускается, идёт поиск устройств.");
+                return;
+            }
+
+            // The server dies on its own often enough that waiting for someone to notice
+            // is not a plan: if it is gone and we are allowed to start it, start it.
+            if (_scene.AutoStartOpenRgb && !OpenRgbLauncher.IsRunning())
+            {
+                Say("OpenRGB не отвечает, запускаю заново.");
+                EnsureServer();
             }
             return;
         }
@@ -1005,7 +1031,7 @@ public sealed partial class MainWindow : Window
         _lastListPoll = now;
 
         int before = _hub.Devices.Length;
-        _hub.Refresh();
+        if (!_hub.TryRefresh()) return;
 
         if (_hub.Devices.Length != before)
         {
@@ -1110,12 +1136,22 @@ public sealed partial class MainWindow : Window
 
         System.Threading.Tasks.Task.Run(() =>
         {
-            _hub.Dispose();
-            string what = OpenRgbLauncher.Restart(
-                string.IsNullOrWhiteSpace(_scene.OpenRgbPath) ? null : _scene.OpenRgbPath,
-                _scene.OpenRgbAsAdmin);
+            string what = "";
+            bool back = false;
 
-            bool back = WaitForDevices();
+            try
+            {
+                _hub.Dispose();
+                what = OpenRgbLauncher.Restart(
+                    string.IsNullOrWhiteSpace(_scene.OpenRgbPath) ? null : _scene.OpenRgbPath,
+                    _scene.OpenRgbAsAdmin);
+
+                back = WaitForDevices();
+            }
+            finally
+            {
+                _recovering = false;
+            }
 
             Dispatcher.Invoke(() =>
             {
@@ -1124,7 +1160,6 @@ public sealed partial class MainWindow : Window
 
                 _painter.Resume(0);
                 if (wasPainting && !_painter.IsRunning) _painter.Start();
-                _recovering = false;
             });
         });
     }

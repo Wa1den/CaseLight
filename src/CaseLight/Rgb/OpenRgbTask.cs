@@ -90,12 +90,30 @@ public static class OpenRgbTask
     static string Escape(string s) =>
         s.Replace("&", "&amp;").Replace("<", "&lt;").Replace(">", "&gt;");
 
-    /// <summary>Whether the task is registered. Reading the list needs no rights.</summary>
+    static bool _known;
+    static long _knownAt;
+
+    /// <summary>
+    /// Whether the task is registered. Reading the list needs no rights.
+    ///
+    /// The answer is kept for half a minute: this is asked on the way to every server
+    /// launch, sometimes from the interface thread, and each question is a process start.
+    /// Creating or removing the task answers it again immediately.
+    /// </summary>
     public static bool Exists()
     {
-        try { return Run("schtasks", $"/query /tn \"{TaskName}\"", out _) == 0; }
-        catch { return false; }
+        long now = Environment.TickCount64;
+        if (_knownAt > 0 && now - _knownAt < 30000) return _known;
+
+        try { _known = Run("schtasks", $"/query /tn \"{TaskName}\"", out _) == 0; }
+        catch { _known = false; }
+
+        _knownAt = now;
+        return _known;
     }
+
+    /// <summary>Drops the cached answer after the task list has been changed by us.</summary>
+    static void Forget() => _knownAt = 0;
 
     /// <summary>
     /// Registers the task. Raises one UAC prompt, which is the whole point of doing it.
@@ -117,7 +135,8 @@ public static class OpenRgbTask
                 return "создание задания отменено";
 
             // schtasks returns before the registration is visible, hence the short wait
-            for (int i = 0; i < 20 && !Exists(); i++) System.Threading.Thread.Sleep(200);
+            Forget();
+            for (int i = 0; i < 20 && !Exists(); i++) { Forget(); System.Threading.Thread.Sleep(200); }
 
             bool ok = Exists();
             ProbeLog.Log("планировщик", ok ? "задание создано: " + exePath : "задание создать не удалось");
@@ -143,7 +162,8 @@ public static class OpenRgbTask
             if (!Elevated("schtasks", $"/delete /tn \"{TaskName}\" /f"))
                 return "удаление задания отменено";
 
-            for (int i = 0; i < 20 && Exists(); i++) System.Threading.Thread.Sleep(200);
+            Forget();
+            for (int i = 0; i < 20 && Exists(); i++) { Forget(); System.Threading.Thread.Sleep(200); }
 
             ProbeLog.Log("планировщик", "задание удалено");
             return "задание удалено, автозапуск OpenRGB с правами выключен";

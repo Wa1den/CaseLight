@@ -63,7 +63,14 @@ public enum WakeRecovery
     /// <summary>Just resume - fine if the lighting survives sleep on this machine.</summary>
     Nothing,
 
-    /// <summary>Ask the server to look for hardware again. Gentler, but it can crash it.</summary>
+    /// <summary>
+    /// Ask the server to look for hardware again.
+    ///
+    /// Kept only so that settings written earlier still load; the program treats it as a
+    /// restart. The request kills the server outright on this hardware - three times out
+    /// of three, with the client disconnected beforehand, so it is not a matter of who is
+    /// holding the device list.
+    /// </summary>
     Rescan,
 
     /// <summary>Close the server and start it fresh. Blunt and reliable.</summary>
