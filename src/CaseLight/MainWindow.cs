@@ -820,7 +820,11 @@ public sealed partial class MainWindow : Window
                 return;
             }
 
-            _painter.Resume(_scene.ResumeDelayMs);
+            // No delay here. The pause before the first write is there because the buses
+            // are still settling after a wake, and waking is handled above; this branch is
+            // an unlock, a screen coming back, or the very first notification at startup.
+            // Holding those for eight seconds only left the case dark for no reason.
+            _painter.Resume(0);
         };
     }
 
@@ -1093,15 +1097,21 @@ public sealed partial class MainWindow : Window
     {
         EnsureServer();
 
-        // Deliberately not a forced reconnect: OpenRGB dies on the client disconnect - all
-        // three crashes in the log end on "Closing server connection" - so an existing
-        // connection is worth far more than a fresh one.
-        if (!_hub.Connect()) { Say(_hub.Status); return; }
+        // Starting does not wait for the server. The paint loop connects on its own and
+        // keeps retrying, while the port opens only seconds after the server is launched -
+        // so refusing here is what left a case dark after a launch with "start painting"
+        // ticked, until someone pressed the button by hand.
+        //
+        // Deliberately not a forced reconnect either: OpenRGB dies on the client
+        // disconnect - all three crashes in the log end on "Closing server connection" -
+        // so an existing connection is worth far more than a fresh one.
+        _hub.Connect();
 
         _painter.UseScene(_scene);
         _painter.Start();
         _paintingWanted = true;
-        Say("Раскраска запущена.");
+
+        Say(_hub.IsReady ? "Раскраска запущена." : "Раскраска запущена, жду OpenRGB.");
     }
 
     /// <summary>
