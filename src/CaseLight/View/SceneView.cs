@@ -455,9 +455,58 @@ public sealed class SceneView : FrameworkElement
         bool edited = _drag is Drag.Move or Drag.Resize or Drag.Rotate;
 
         if (_drag != Drag.None) { _drag = Drag.None; ReleaseMouseCapture(); }
-        if (edited) FixtureEdited?.Invoke(this, EventArgs.Empty);
+
+        if (edited)
+        {
+            if (Selected != null) SnapInsideScreen(Selected);
+            InvalidateVisual();
+            FixtureEdited?.Invoke(this, EventArgs.Empty);
+        }
 
         base.OnMouseUp(e);
+    }
+
+    /// <summary>
+    /// Pulls a fixture left straddling the edge of the screen back inside it.
+    ///
+    /// Half in and half out is the one placement that means nothing: the LEDs inside read
+    /// the picture where they stand, while those outside have their coordinate clamped to
+    /// the edge, so one fixture ends up sampling two different ways. Snapping at the end of
+    /// the drag settles it without fighting the mouse while it moves.
+    ///
+    /// A fixture standing entirely clear of the screen is left alone - that one is beside
+    /// the monitor on purpose, which is the normal place for a case to be.
+    /// </summary>
+    void SnapInsideScreen(Fixture f)
+    {
+        var m = Scene.Monitor;
+        double left = m.CenterX - m.Width / 2, right = m.CenterX + m.Width / 2;
+        double top = m.CenterY - m.Height / 2, bottom = m.CenterY + m.Height / 2;
+
+        var corners = LedGeometry.Corners(f);
+        double x0 = corners.Min(c => c.X), x1 = corners.Max(c => c.X);
+        double y0 = corners.Min(c => c.Y), y1 = corners.Max(c => c.Y);
+
+        bool overlaps = x1 > left && x0 < right && y1 > top && y0 < bottom;
+        if (!overlaps) return;
+
+        double dx = 0, dy = 0;
+
+        // a fixture too large to fit is left where it is rather than shoved about
+        if (x1 - x0 <= right - left)
+        {
+            if (x0 < left) dx = left - x0;
+            else if (x1 > right) dx = right - x1;
+        }
+
+        if (y1 - y0 <= bottom - top)
+        {
+            if (y0 < top) dy = top - y0;
+            else if (y1 > bottom) dy = bottom - y1;
+        }
+
+        f.CenterX += dx;
+        f.CenterY += dy;
     }
 
     protected override void OnMouseWheel(MouseWheelEventArgs e)
