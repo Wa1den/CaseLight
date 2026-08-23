@@ -40,6 +40,7 @@ dotnet publish src/CaseLight/CaseLight.csproj -c Release -r win-x64 --self-conta
 | --- | --- |
 | [Model/Fixture.cs](src/CaseLight/Model/Fixture.cs) | фигура: прямоугольник, форма раскладки диодов, привязка к железу (`Binding`) |
 | [Model/LedGeometry.cs](src/CaseLight/Model/LedGeometry.cs) | где сидит каждый диод: локально в 0..1, затем на сцене в мм; попадание мышью |
+| [Model/DisplaySize.cs](src/CaseLight/Model/DisplaySize.cs) | физический размер выбранного экрана из EDID, с поправкой на поворот |
 | [Model/Scene.cs](src/CaseLight/Model/Scene.cs) | всё состояние программы одним объектом: раскладка + все настройки, save/load/import |
 | [Render/CasePainter.cs](src/CaseLight/Render/CasePainter.cs) | поток раскраски: кадр → выборка зон → цветовой конвейер → OpenRGB |
 | [Rgb/RgbHub.cs](src/CaseLight/Rgb/RgbHub.cs) | единственное место, которое говорит с OpenRGB |

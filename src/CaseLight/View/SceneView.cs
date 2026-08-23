@@ -184,9 +184,9 @@ public sealed class SceneView : FrameworkElement
         var br = ToScreen(new Point(m.CenterX + m.Width / 2, m.CenterY + m.Height / 2));
         var rect = new Rect(tl, br);
 
+        // No caption: the screen is the only rectangle of its kind on the canvas, and one
+        // more word among the fixture labels is one more thing to read past.
         dc.DrawRectangle(Ink(0.05), new Pen(Ink(0.35), 2), rect);
-
-        Label(dc, "монитор", new Point(rect.Left + 8, rect.Top + 6), ThemedColor("FgDim"), 13);
     }
 
     void DrawFixture(DrawingContext dc, Fixture f, bool selected)

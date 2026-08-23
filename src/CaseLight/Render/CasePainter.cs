@@ -91,6 +91,15 @@ public sealed class CasePainter : IDisposable
     public long FramesReceived { get; private set; }
     public long LastFrameAgeMs { get; private set; }
     public string SourceInfo { get; private set; } = "—";
+
+    /// <summary>
+    /// Which screen the frames on the bus belong to.
+    ///
+    /// The publisher chooses the screen, and the case has to know which one it is: the
+    /// monitor rectangle on the scene is that screen, and a layout built against another
+    /// one samples the wrong part of the picture.
+    /// </summary>
+    public string BusMonitorDeviceName { get; private set; } = "";
     public int LedCount => _targets.Length;
 
     public CasePainter(RgbHub hub, Scene scene)
@@ -403,6 +412,7 @@ public sealed class CasePainter : IDisposable
 
         FramesReceived++;
         LastFrameAgeMs = info.AgeMs;
+        BusMonitorDeviceName = info.MonitorDeviceName;
         SourceInfo = $"Rimlight, {info.Width}×{info.Height}, экран {info.MonitorDeviceName}";
 
         ZoneSampler.Sample(_image, info.Width, info.Height, info.Stride, _zones, _sampled);

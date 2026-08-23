@@ -43,7 +43,7 @@ public sealed partial class MainWindow : Window
     StackPanel _fixturePanel = null!;
     ListBox _fixtureList = null!;
     TextBlock _status = null!;
-    TextBlock _captureStats = null!;
+    TextBlock[] _statValues = System.Array.Empty<TextBlock>();
     Button _testButton = null!;
 
     bool _rebuildingUi;
@@ -414,11 +414,6 @@ public sealed partial class MainWindow : Window
             Ui.Btn("Копия", DuplicateFixture),
             Ui.Btn("Удалить", RemoveFixture)));
 
-        panel.Children.Add(Ui.Header("Монитор",
-            "Размер видимой части панели, а не корпуса. От него отсчитывается, какой участок экрана приходится на каждый диод."));
-        panel.Children.Add(Ui.Num("Ширина, мм", _scene.Monitor.Width, v => { _scene.Monitor.Width = Math.Max(10, v); Touch(); }));
-        panel.Children.Add(Ui.Num("Высота, мм", _scene.Monitor.Height, v => { _scene.Monitor.Height = Math.Max(10, v); Touch(); }));
-
         SyncFixtureList();
     });
 
@@ -441,34 +436,44 @@ public sealed partial class MainWindow : Window
             Touch();
         };
 
-        string help = _scene.CaptureSource == CaptureSource.FromRimlight
-            ? "Кадры приходят от Rimlight через разделяемую память, собственный захват при этом не работает. В Rimlight требуется включить отдачу кадров."
-            : "DDA самый быстрый, но при нём Windows иногда рисует курсор через композицию, и курсор мерцает. WGC работает мягче. GDI доступен всегда. " +
-              "«Автоматически» держит DDA и WGC одновременно и переходит на GDI, когда оба перестают выдавать кадры. " +
-              "От Rimlight собственный захват не зависит, но при одновременной работе экран снимается дважды.";
+        panel.Children.Add(Ui.Labelled("Метод", box,
+            "Кадры приходят от Rimlight через разделяемую память, тогда собственный захват не работает и экран снимается один раз на две программы; " +
+            "в Rimlight для этого включается отдача кадров. У собственного захвата DDA самый быстрый, но при нём Windows иногда рисует курсор через " +
+            "композицию, и курсор мерцает. WGC работает мягче. GDI доступен всегда. «Автоматически» держит DDA и WGC одновременно и переходит на GDI, " +
+            "когда оба перестают выдавать кадры."));
 
-        panel.Children.Add(Ui.Labelled("Метод", box, help));
+        // ---- экран
+        bool ourCapture = _scene.CaptureSource != CaptureSource.FromRimlight;
+        var monitors = Native.EnumerateMonitors();
 
-        if (_scene.CaptureSource != CaptureSource.FromRimlight)
+        var monitorBox = new ComboBox { Margin = new Thickness(0, 2, 0, 0), IsEnabled = ourCapture };
+        foreach (var m in monitors) monitorBox.Items.Add(m.ToString());
+
+        int index = monitors.FindIndex(m => m.DeviceName == _scene.MonitorDeviceName);
+        if (index < 0) index = monitors.FindIndex(m => m.IsPrimary);
+        monitorBox.SelectedIndex = Math.Max(0, index);
+
+        monitorBox.SelectionChanged += (_, _) =>
         {
-            var monitorBox = new ComboBox { Margin = new Thickness(0, 2, 0, 0) };
-            var monitors = Native.EnumerateMonitors();
+            int i = monitorBox.SelectedIndex;
+            if (i < 0 || i >= monitors.Count) return;
 
-            monitorBox.Items.Add("Основной экран");
-            foreach (var m in monitors)
-                monitorBox.Items.Add($"{m.DisplayName} — {m.Width}×{m.Height}");
+            _scene.MonitorDeviceName = monitors[i].DeviceName;
+            AdoptScreen(monitors[i]);
 
-            int index = monitors.FindIndex(m => m.DeviceName == _scene.MonitorDeviceName);
-            monitorBox.SelectedIndex = index >= 0 ? index + 1 : 0;
+            // the rectangle can change shape entirely - an ultrawide for a portrait screen -
+            // so bring the whole layout back into view rather than leave it off the edge
+            _view.FitToContent();
 
-            monitorBox.SelectionChanged += (_, _) =>
-            {
-                int i = monitorBox.SelectedIndex;
-                _scene.MonitorDeviceName = i <= 0 ? "" : monitors[i - 1].DeviceName;
-                Touch();
-            };
-            panel.Children.Add(Ui.Labelled("Экран", monitorBox));
-        }
+            RebuildSections();
+            Touch();
+        };
+
+        panel.Children.Add(Ui.Labelled("Экран", monitorBox, ourCapture
+            ? "От выбранного экрана берётся не только картинка: его физический размер задаёт прямоугольник монитора на холсте, вместе с поворотом."
+            : "Экран для захвата выбирается в Rimlight. Прямоугольник монитора на холсте берётся от того экрана, кадры которого приходят по шине."));
+
+        panel.Children.Add(Ui.Note($"Прямоугольник монитора: {_scene.Monitor.Width:F0} × {_scene.Monitor.Height:F0} мм"));
 
         panel.Children.Add(Ui.Slide("Кадров в секунду", _scene.MaxFps, 1, 120, 1, v => { _scene.MaxFps = (int)v; Touch(); }, "",
             "Верхний предел для быстрых устройств. Медленным задаётся свой делитель в параметрах фигуры."));
@@ -477,9 +482,73 @@ public sealed partial class MainWindow : Window
             "Размер участка экрана, усредняемого для одного диода. При малом значении цвет меняется от любого движения в кадре, при большом усредняется до однородного оттенка."));
 
         panel.Children.Add(Ui.Header("Статистика"));
-        _captureStats = Ui.Mono();
-        panel.Children.Add(_captureStats);
+        panel.Children.Add(BuildStats());
     });
+
+    /// <summary>
+    /// Takes the monitor rectangle from the screen itself.
+    ///
+    /// It used to be typed in by hand, which meant it was usually the size of some other
+    /// monitor: the numbers are hard to look up and easy to leave stale. EDID knows them,
+    /// so the only thing left to choose is which screen.
+    /// </summary>
+    void AdoptScreen(MonitorInfo monitor)
+    {
+        var (w, h) = DisplaySize.Rect(monitor, _scene.Monitor.Width);
+        _scene.Monitor.Width = w;
+        _scene.Monitor.Height = h;
+        _view.InvalidateVisual();
+    }
+
+    static readonly string[] StatRows =
+        { "Источник", "Состояние", "Кадры", "Частота", "Задержка", "Диодов", "OpenRGB" };
+
+    /// <summary>
+    /// The statistics as a two-column table.
+    ///
+    /// It used to be one monospaced block padded with spaces, which fell apart the moment a
+    /// value grew longer than its column. A grid lines the values up on its own and lets
+    /// the long ones wrap.
+    /// </summary>
+    UIElement BuildStats()
+    {
+        var grid = new Grid { Margin = new Thickness(0, 2, 0, 0) };
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+
+        _statValues = new TextBlock[StatRows.Length];
+
+        for (int i = 0; i < StatRows.Length; i++)
+        {
+            grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+
+            var label = new TextBlock
+            {
+                Text = StatRows[i],
+                Foreground = Ui.FgDim,
+                FontSize = Ui.TextSize,
+                Margin = new Thickness(0, 2, 14, 2)
+            };
+            Grid.SetRow(label, i);
+            Grid.SetColumn(label, 0);
+            grid.Children.Add(label);
+
+            var value = new TextBlock
+            {
+                Foreground = Ui.Fg,
+                FontSize = Ui.TextSize,
+                TextWrapping = TextWrapping.Wrap,
+                Margin = new Thickness(0, 2, 0, 2)
+            };
+            Grid.SetRow(value, i);
+            Grid.SetColumn(value, 1);
+            grid.Children.Add(value);
+
+            _statValues[i] = value;
+        }
+
+        return grid;
+    }
 
     void BuildPowerSection() => AddSection("Питание", "\uE7E8", panel =>
     {
@@ -787,20 +856,56 @@ public sealed partial class MainWindow : Window
 
         if (_painter.IsRunning) Say(_painter.Status);
 
-        if (_captureStats != null)
+        if (_statValues.Length == StatRows.Length)
         {
-            _captureStats.Text =
-                $"источник:   {_painter.SourceInfo}\n" +
-                $"состояние:  {_painter.Status}\n" +
-                $"кадров:     принято {_painter.FramesReceived}, отрисовано {_painter.FramesPainted}\n" +
-                $"частота:    {_painter.Fps:F1} кадров в секунду\n" +
-                $"возраст:    {_painter.LastFrameAgeMs} мс\n" +
-                $"диодов:     {_painter.LedCount}\n" +
-                $"OpenRGB:    {_hub.Status}";
+            _statValues[0].Text = _painter.SourceInfo;
+            _statValues[1].Text = _painter.Status;
+            _statValues[2].Text = $"принято {_painter.FramesReceived}, отрисовано {_painter.FramesPainted}";
+            _statValues[3].Text = $"{_painter.Fps:F1} в секунду";
+            _statValues[4].Text = $"{_painter.LastFrameAgeMs} мс";
+            _statValues[5].Text = _painter.LedCount.ToString();
+            _statValues[6].Text = _hub.Status;
         }
+
+        FollowBusScreen();
 
         if (_tray != null) _tray.Visible = _scene.MinimizeToTray;
     }
+
+    /// <summary>
+    /// Keeps the monitor rectangle matching the screen Rimlight is sending.
+    ///
+    /// With frames coming over the bus the choice of screen belongs to Rimlight, so the
+    /// only honest thing to do is follow it. The size is measured, not chosen, so it is
+    /// written onto the saved copy as well - the same treatment window geometry gets, and
+    /// for the same reason: a pending-changes bar for something nobody edited is noise.
+    /// </summary>
+    void FollowBusScreen()
+    {
+        if (_scene.CaptureSource != CaptureSource.FromRimlight) return;
+
+        string name = _painter.BusMonitorDeviceName;
+        if (string.IsNullOrEmpty(name) || name == _adoptedBusScreen) return;
+
+        var monitor = Native.EnumerateMonitors().FirstOrDefault(m => m.DeviceName == name);
+        if (monitor == null) return;
+
+        _adoptedBusScreen = name;
+
+        var (w, h) = DisplaySize.Rect(monitor, _scene.Monitor.Width);
+        if (Math.Abs(w - _scene.Monitor.Width) < 0.5 && Math.Abs(h - _scene.Monitor.Height) < 0.5) return;
+
+        _scene.Monitor.Width = _saved.Monitor.Width = w;
+        _scene.Monitor.Height = _saved.Monitor.Height = h;
+
+        _painter.Invalidate();
+        _view.InvalidateVisual();
+        UpdateDirtyBar();
+        Say($"Экран из Rimlight: {monitor.DisplayName}, {w:F0} × {h:F0} мм");
+    }
+
+    /// <summary>Which bus screen has already been taken, so it is measured once.</summary>
+    string _adoptedBusScreen = "";
 
     void Say(string text) => _status.Text = text;
 
