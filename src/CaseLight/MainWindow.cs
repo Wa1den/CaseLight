@@ -93,7 +93,9 @@ public sealed partial class MainWindow : Window
 
         _view.Scene = _scene;
         _view.SelectionChanged += (_, _) => { SyncFixtureList(); ShowFixturePanel(); };
-        _view.FixtureChanged += (_, _) => { _painter.Invalidate(); BuildFixturePanel(); };
+        // Touch, not just a redraw: dragging a fixture edits the scene exactly as typing
+        // a coordinate does, and the pending-changes bar has to say so either way.
+        _view.FixtureChanged += (_, _) => { BuildFixturePanel(); Touch(); };
         _view.TestMoved += (_, _) => PushTestPatch();
 
         HookPower();
