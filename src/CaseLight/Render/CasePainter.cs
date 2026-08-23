@@ -300,13 +300,30 @@ public sealed class CasePainter : IDisposable
                 Fps = framesThisSecond * 1000.0 / (tick - fpsWindow);
                 framesThisSecond = 0;
                 fpsWindow = tick;
-                Status = test != null
-                    ? $"тест размещения, {Fps:F0} кадров в секунду"
-                    : $"идёт раскраска, {Fps:F0} кадров в секунду";
+                Status = (test != null ? "тест размещения, " : "идёт раскраска, ") + Rate(Fps);
             }
 
             Thread.Sleep(periodMs);
         }
+    }
+
+    /// <summary>
+    /// The frame rate with its noun in the right case.
+    ///
+    /// Russian declines the noun after a number - one кадр, two кадра, five кадров - and a
+    /// status line that reads "3 кадров" looks like a bug in everything around it.
+    /// </summary>
+    static string Rate(double fps)
+    {
+        int n = (int)Math.Round(fps);
+        int tail = n % 100, last = n % 10;
+
+        string word = tail is >= 11 and <= 14 ? "кадров"
+                    : last == 1 ? "кадр"
+                    : last is >= 2 and <= 4 ? "кадра"
+                    : "кадров";
+
+        return $"{n} {word} в секунду";
     }
 
     /// <summary>
