@@ -141,7 +141,10 @@ public sealed class SceneView : FrameworkElement
         DrawMonitor(dc);
 
         foreach (var f in Scene.Fixtures)
+        {
+            if (!f.Enabled && !Scene.ShowDisabled && f != Selected) continue;
             DrawFixture(dc, f, f == Selected);
+        }
 
         if (Selected != null && !TestMode) DrawHandles(dc, Selected);
         if (TestMode) DrawTestPatch(dc);

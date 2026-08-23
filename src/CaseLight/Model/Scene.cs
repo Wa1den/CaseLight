@@ -138,6 +138,15 @@ public sealed class Scene
     public double SmoothingRise { get; set; } = 0.55;
     public double SmoothingFall { get; set; } = 0.18;
 
+    /// <summary>
+    /// Whether fixtures switched out of the painting are still drawn on the canvas.
+    ///
+    /// A layout is easier to read without them, but they must not disappear altogether:
+    /// the selected one is always drawn, otherwise picking it from the list would point at
+    /// an empty patch of canvas.
+    /// </summary>
+    public bool ShowDisabled { get; set; } = true;
+
     // ---- тест размещения --------------------------------------------------
 
     public TestShape TestShape { get; set; } = TestShape.Circle;

@@ -428,6 +428,7 @@ public sealed partial class MainWindow : Window
         grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         grid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
         grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
 
         var header = Ui.Header("Фигуры",
             "Одна фигура на каждое светящееся устройство. Параметры выбранной фигуры открываются панелью поверх холста.");
@@ -450,6 +451,12 @@ public sealed partial class MainWindow : Window
         buttons.Margin = new Thickness(0, 0, 0, 0);
         Grid.SetRow(buttons, 2);
         grid.Children.Add(buttons);
+
+        var showDisabled = Ui.Check("Отображать отключённые", _scene.ShowDisabled,
+            v => { _scene.ShowDisabled = v; Touch(); },
+            "Фигуры, снятые с раскраски, перестают рисоваться на холсте. Выбранная фигура рисуется в любом случае.");
+        Grid.SetRow(showDisabled, 3);
+        grid.Children.Add(showDisabled);
 
         AddSection("Устройства", "\uE772", Ui.Card(grid));
         SyncFixtureList();
