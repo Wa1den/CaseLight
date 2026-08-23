@@ -21,7 +21,17 @@ public sealed class SceneView : FrameworkElement
     public Fixture? Selected { get; private set; }
 
     public event EventHandler? SelectionChanged;
+    /// <summary>Raised on every step of a drag, while the numbers are still moving.</summary>
     public event EventHandler? FixtureChanged;
+
+    /// <summary>
+    /// Raised once the drag is over and the fixture has come to rest.
+    ///
+    /// Anything that costs real work - rebuilding the fixture panel, comparing the whole
+    /// scene against the saved copy - belongs here rather than on every mouse move, where
+    /// it would run a hundred times for one gesture and be thrown away ninety-nine times.
+    /// </summary>
+    public event EventHandler? FixtureEdited;
 
     /// <summary>Pixels per millimetre.</summary>
     double _scale = 0.6;
@@ -442,7 +452,11 @@ public sealed class SceneView : FrameworkElement
 
     protected override void OnMouseUp(MouseButtonEventArgs e)
     {
+        bool edited = _drag is Drag.Move or Drag.Resize or Drag.Rotate;
+
         if (_drag != Drag.None) { _drag = Drag.None; ReleaseMouseCapture(); }
+        if (edited) FixtureEdited?.Invoke(this, EventArgs.Empty);
+
         base.OnMouseUp(e);
     }
 

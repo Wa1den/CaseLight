@@ -93,9 +93,15 @@ public sealed partial class MainWindow : Window
 
         _view.Scene = _scene;
         _view.SelectionChanged += (_, _) => { SyncFixtureList(); ShowFixturePanel(); };
-        // Touch, not just a redraw: dragging a fixture edits the scene exactly as typing
-        // a coordinate does, and the pending-changes bar has to say so either way.
-        _view.FixtureChanged += (_, _) => { BuildFixturePanel(); Touch(); };
+        // Live while the mouse moves: the painter only sets a flag and rebuilds its zones
+        // once per frame anyway, so the case follows the fixture as it is dragged.
+        _view.FixtureChanged += (_, _) => _painter.Invalidate();
+
+        // The expensive half waits for the mouse to come up. Dragging a fixture edits the
+        // scene exactly as typing a coordinate does, so the pending-changes bar has to say
+        // so - but rebuilding the panel and serialising the scene are not worth doing a
+        // hundred times for one gesture.
+        _view.FixtureEdited += (_, _) => { BuildFixturePanel(); Touch(); };
         _view.TestMoved += (_, _) => PushTestPatch();
 
         HookPower();
