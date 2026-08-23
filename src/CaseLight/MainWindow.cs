@@ -300,11 +300,23 @@ public sealed partial class MainWindow : Window
         var panel = new StackPanel();
         build(panel);
 
-        _pages.Add(new ScrollViewer
+        AddSection(title, glyph, new ScrollViewer
         {
             VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
             Content = Ui.Card(panel)
         });
+    }
+
+    /// <summary>
+    /// A section whose page brings its own layout.
+    ///
+    /// The usual page is a column of controls that scrolls when it runs long. A page built
+    /// around a list wants the opposite - the list should take the height that is going
+    /// spare - and that cannot be said in a stack.
+    /// </summary>
+    void AddSection(string title, string glyph, UIElement page)
+    {
+        _pages.Add(page);
 
         var row = new StackPanel { Orientation = Orientation.Horizontal };
         row.Children.Add(new TextBlock
@@ -371,10 +383,16 @@ public sealed partial class MainWindow : Window
         panel.Children.Add(Ui.Check("Запускать OpenRGB, если он не запущен", _scene.AutoStartOpenRgb, v => { _scene.AutoStartOpenRgb = v; Touch(); },
             "Сервер запускается с ключами --server --startminimized: первый открывает порт 6742, второй убирает окно."));
         panel.Children.Add(Ui.Check("Запускать от администратора", _scene.OpenRgbAsAdmin, v => { _scene.OpenRgbAsAdmin = v; Touch(); },
-            "Права требуются только для оперативной памяти на шине SMBus. Плата и видеокарта доступны без них, и тогда UAC при каждом входе не запрашивается."));
+            "Права требуются только для оперативной памяти: она на шине SMBus. Устройства на ARGB-контроллере доступны без них, и тогда UAC при каждом входе не запрашивается."));
 
-        panel.Children.Add(Ui.Text("Путь к OpenRGB.exe", _scene.OpenRgbPath, v => { _scene.OpenRgbPath = v; Touch(); },
-            "Пустое поле - искать самостоятельно: сначала в Program Files и %LocalAppData%\\Programs, затем в записях об удалении в реестре."));
+        // Shown, not stored: the setting stays empty so the search runs again if OpenRGB
+        // ever moves, while the field says which file that search lands on today.
+        string knownPath = string.IsNullOrWhiteSpace(_scene.OpenRgbPath)
+            ? OpenRgbLauncher.FindExe() ?? ""
+            : _scene.OpenRgbPath;
+
+        panel.Children.Add(Ui.Text("Путь к OpenRGB.exe", knownPath, v => { _scene.OpenRgbPath = v; Touch(); },
+            "Заполняется найденным файлом. Пустое поле - искать заново при каждом запуске: сначала в Program Files и %LocalAppData%\\Programs, затем в записях об удалении в реестре."));
         panel.Children.Add(Ui.Row(Ui.Btn("Найти", () =>
         {
             string? found = OpenRgbLauncher.FindExe();
@@ -396,26 +414,38 @@ public sealed partial class MainWindow : Window
         panel.Children.Add(Ui.Note(Scene.LogPath));
     });
 
-    void BuildDevicesSection() => AddSection("Устройства", "\uE772", panel =>
+    void BuildDevicesSection()
     {
-        panel.Children.Add(Ui.Header("Фигуры",
-            "Одна фигура на каждое светящееся устройство. Параметры выбранной фигуры открываются панелью поверх холста."));
+        var grid = new Grid();
+        grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        grid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+        grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
 
-        _fixtureList = new ListBox { Height = 260 };
+        var header = Ui.Header("Фигуры",
+            "Одна фигура на каждое светящееся устройство. Параметры выбранной фигуры открываются панелью поверх холста.");
+        Grid.SetRow(header, 0);
+        grid.Children.Add(header);
+
+        _fixtureList = new ListBox { Margin = new Thickness(0, 0, 0, 8) };
         _fixtureList.SelectionChanged += (_, _) =>
         {
             if (_syncingList) return;
             _view.Select((_fixtureList.SelectedItem as FixtureItem)?.Fixture);
         };
-        panel.Children.Add(_fixtureList);
+        Grid.SetRow(_fixtureList, 1);
+        grid.Children.Add(_fixtureList);
 
-        panel.Children.Add(Ui.Row(
+        var buttons = Ui.Row(
             Ui.Btn("Добавить", AddFixture),
             Ui.Btn("Копия", DuplicateFixture),
-            Ui.Btn("Удалить", RemoveFixture)));
+            Ui.Btn("Удалить", RemoveFixture));
+        buttons.Margin = new Thickness(0, 0, 0, 0);
+        Grid.SetRow(buttons, 2);
+        grid.Children.Add(buttons);
 
+        AddSection("Устройства", "\uE772", Ui.Card(grid));
         SyncFixtureList();
-    });
+    }
 
     void BuildCaptureSection() => AddSection("Захват", "\uE7F4", panel =>
     {
@@ -437,10 +467,8 @@ public sealed partial class MainWindow : Window
         };
 
         panel.Children.Add(Ui.Labelled("Метод", box,
-            "Кадры приходят от Rimlight через разделяемую память, тогда собственный захват не работает и экран снимается один раз на две программы; " +
-            "в Rimlight для этого включается отдача кадров. У собственного захвата DDA самый быстрый, но при нём Windows иногда рисует курсор через " +
-            "композицию, и курсор мерцает. WGC работает мягче. GDI доступен всегда. «Автоматически» держит DDA и WGC одновременно и переходит на GDI, " +
-            "когда оба перестают выдавать кадры."));
+            "От Rimlight кадры приходят через разделяемую память, свой захват при этом не работает. " +
+            "«Автоматически» держит DDA и WGC вместе и переходит на GDI, когда те перестают выдавать кадры."));
 
         // ---- экран
         bool ourCapture = _scene.CaptureSource != CaptureSource.FromRimlight;
@@ -469,9 +497,8 @@ public sealed partial class MainWindow : Window
             Touch();
         };
 
-        panel.Children.Add(Ui.Labelled("Экран", monitorBox, ourCapture
-            ? "От выбранного экрана берётся не только картинка: его физический размер задаёт прямоугольник монитора на холсте, вместе с поворотом."
-            : "Экран для захвата выбирается в Rimlight. Прямоугольник монитора на холсте берётся от того экрана, кадры которого приходят по шине."));
+        panel.Children.Add(Ui.Labelled("Экран", monitorBox,
+            "Монитор для захвата. При режиме получения от Rimlight выбор определяется им."));
 
         panel.Children.Add(Ui.Note($"Прямоугольник монитора: {_scene.Monitor.Width:F0} × {_scene.Monitor.Height:F0} мм"));
 
@@ -591,7 +618,7 @@ public sealed partial class MainWindow : Window
         panel.Children.Add(Ui.Note("Подсветка внутри корпуса воспроизводит изображение с экрана. Каждое светящееся устройство " +
                                    "описывается там, где оно физически стоит, и получает цвет с ближайшего к нему участка экрана."));
 
-        panel.Children.Add(Ui.Note("Управление идёт через OpenRGB: плата, ленты и вентиляторы на её разъёмах, видеокарта, память. " +
+        panel.Children.Add(Ui.Note("Управление идёт через OpenRGB: устройства на ARGB-контроллере и оперативная память на шине SMBus. " +
                                    "Сервер запускается программой, если не запущен, и перезапускается после выхода из сна."));
 
         panel.Children.Add(Ui.Note("Кадры берутся собственным захватом или принимаются от Rimlight, подсветки монитора. " +

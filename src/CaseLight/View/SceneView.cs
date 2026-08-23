@@ -226,8 +226,10 @@ public sealed class SceneView : FrameworkElement
             dc.DrawEllipse(brush, null, p, i == f.AnchorLed ? dot * 1.7 : dot, i == f.AnchorLed ? dot * 1.7 : dot);
         }
 
+        // Just the name: the LED count is in the fixture panel and on the list, and on a
+        // canvas of eight labels every extra word is one more thing to read past.
         var top = corners.OrderBy(c => c.Y).First();
-        Label(dc, $"{f.Name} · {f.LedCount}", new Point(top.X - 20, top.Y - 20),
+        Label(dc, f.Name, new Point(top.X - 20, top.Y - 20),
               ThemedColor(selected ? "Fg" : "FgDim"), 12);
     }
 

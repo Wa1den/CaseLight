@@ -142,7 +142,7 @@ public sealed partial class MainWindow
         _fixturePanel.Children.Add(Ui.Text("Название", f.Name, v => { f.Name = v; SyncFixtureList(); Touch(); }));
         _fixturePanel.Children.Add(Ui.Check("Участвует в раскраске", f.Enabled, v => { f.Enabled = v; SyncFixtureList(); Touch(); }));
         _fixturePanel.Children.Add(Ui.Int("Обновлять раз в N кадров", f.UpdateEvery, v => { f.UpdateEvery = Math.Max(1, v); Touch(); },
-            "1 — каждый кадр. Оперативной памяти требуется больше: она подключена по SMBus, запись туда медленная и на полной частоте задерживает остальные устройства. Обычно достаточно 10–15."));
+            "1 — каждый кадр. Оперативной памяти требуется больше: она на шине SMBus, запись туда медленная и на полной частоте задерживает остальные устройства. Обычно достаточно 10–15."));
 
         _fixturePanel.Children.Add(Ui.Row(Ui.Btn("Найти в корпусе", HighlightSelected)));
 
@@ -339,7 +339,7 @@ public sealed partial class MainWindow
             "Ниже этой яркости диод гаснет полностью. Иначе почти чёрный экран оставляет подсветку тускло горящей."));
 
         panel.Children.Add(Ui.Header("Баланс по каналам",
-            "Диоды на плате, модулях памяти и вентиляторах передают цвет по-разному. Здесь задаётся общая поправка."));
+            "Диоды разных устройств передают цвет по-разному. Здесь задаётся общая поправка."));
         panel.Children.Add(Ui.Slide("Красный", _scene.GainR, 0, 2, 0.01, v => { _scene.GainR = v; Touch(); }));
         panel.Children.Add(Ui.Slide("Зелёный", _scene.GainG, 0, 2, 0.01, v => { _scene.GainG = v; Touch(); }));
         panel.Children.Add(Ui.Slide("Синий", _scene.GainB, 0, 2, 0.01, v => { _scene.GainB = v; Touch(); }));
