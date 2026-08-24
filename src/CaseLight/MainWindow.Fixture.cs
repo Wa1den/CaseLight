@@ -353,8 +353,16 @@ public sealed partial class MainWindow
         panel.Children.Add(Ui.Slide("Насыщенность", _scene.Saturation, 0, 3, 0.05, v => { _scene.Saturation = v; Touch(); }));
         panel.Children.Add(Ui.Slide("Гамма", _scene.Gamma, 0.5, 4, 0.05, v => { _scene.Gamma = v; Touch(); }));
         panel.Children.Add(Ui.Slide("Температура", _scene.TemperatureK, 1500, 15000, 100, v => { _scene.TemperatureK = (int)v; Touch(); }, " K"));
-        panel.Children.Add(Ui.Slide("Порог темноты", _scene.MinLuma, 0, 0.5, 0.01, v => { _scene.MinLuma = v; Touch(); }, "",
-            "Ниже этой яркости диод гаснет полностью. Иначе почти чёрный экран оставляет подсветку тускло горящей."));
+        panel.Children.Add(Ui.Slide("Порог темноты", _scene.MinLuma, 0, 0.1, 0.0001, v => { _scene.MinLuma = v; Touch(); }, "",
+            "Ниже этой яркости диод гаснет полностью. Иначе почти чёрный экран оставляет подсветку тускло горящей.",
+            format: v => v <= 0 ? "выключен" : v.ToString("0.####", CultureInfo.InvariantCulture)));
+
+        panel.Children.Add(Ui.Slide("Обесцвечивать тёмное", _scene.ShadowNeutral, 0, 0.4, 0.01,
+            v => { _scene.ShadowNeutral = v; Touch(); }, "",
+            "Баланс белого красит все уровни одинаково, и на почти чёрном участке от кадра остаётся один оттенок: " +
+            "чёрная полоса плеера с белыми цифрами при тёплом балансе светит тёмно-красным. Чем ниже яркость, тем " +
+            "сильнее цвет сводится к серому. Ноль отключает.",
+            format: v => v <= 0 ? "выключено" : v.ToString("0.##", CultureInfo.InvariantCulture)));
 
         panel.Children.Add(Ui.Header("Баланс по каналам",
             "Диоды разных устройств передают цвет по-разному. Здесь задаётся общая поправка."));

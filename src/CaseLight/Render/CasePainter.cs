@@ -352,6 +352,7 @@ public sealed class CasePainter : IDisposable
             lastMs = now;
 
             _pipeline.Process(_sampled, _output, ColourSettings(), _zones.Length, dt <= 0 ? periodMs : dt);
+            NeutraliseShadows(_scene.ShadowNeutral);
 
             _frameNo++;
 
@@ -554,6 +555,39 @@ public sealed class CasePainter : IDisposable
             _sampled[o + 2] = inside ? patch.B : (byte)0;
         }
     }
+
+    /// <summary>
+    /// Takes the colour out of what is nearly black, after the pipeline has had its say.
+    ///
+    /// Done here rather than inside the pipeline because that one is the shared copy of the
+    /// Rimlight code, kept identical on both sides. Working on the finished bytes is enough:
+    /// the tint is a proportion between the channels, and pulling them back towards their
+    /// own luminance removes it without touching how bright the LED ends up.
+    /// </summary>
+    void NeutraliseShadows(double knee)
+    {
+        if (knee <= 0) return;
+
+        double limit = knee * 255.0;
+
+        for (int i = 0; i + 2 < _output.Length; i += 3)
+        {
+            double r = _output[i], g = _output[i + 1], b = _output[i + 2];
+
+            double y = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+            if (y >= limit) continue;
+
+            // 1 at the knee, 0 at black: the darker it is, the greyer it comes out
+            double keep = y / limit;
+
+            _output[i] = Fade(y, r, keep);
+            _output[i + 1] = Fade(y, g, keep);
+            _output[i + 2] = Fade(y, b, keep);
+        }
+    }
+
+    static byte Fade(double luma, double channel, double keep) =>
+        (byte)Math.Clamp(Math.Round(luma + (channel - luma) * keep), 0, 255);
 
     ColorSettings ColourSettings() => new()
     {

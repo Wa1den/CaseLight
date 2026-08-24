@@ -144,6 +144,19 @@ public sealed class Scene
     public double Gamma { get; set; } = 2.2;
     public double Saturation { get; set; } = 1.15;
     public double MinLuma { get; set; }
+
+    /// <summary>
+    /// How far up the scale the colour is faded out of the shadows.
+    ///
+    /// White balance is a proportion, so it tints every level alike - and where the picture
+    /// is almost black, the tint is the only thing left to see. A player bar, black with
+    /// white digits, averages to a dark grey, and a warm balance turns that grey into a
+    /// dark red on the case. Fading the colour back towards grey as the level falls settles
+    /// the shadows and leaves real content alone, since there the level is high.
+    ///
+    /// Zero switches it off, which is how it behaved before.
+    /// </summary>
+    public double ShadowNeutral { get; set; }
     public int TemperatureK { get; set; } = 6500;
     public double GainR { get; set; } = 1.0;
     public double GainG { get; set; } = 1.0;
