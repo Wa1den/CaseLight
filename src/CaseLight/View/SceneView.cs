@@ -396,7 +396,8 @@ public sealed class SceneView : FrameworkElement
                 return;
             }
 
-            var corners = LedGeometry.Corners(Selected).Select(ToScreen).ToArray();
+            // the same corners the handles are drawn on, or they cannot be grabbed at all
+            var corners = LedGeometry.BoxCorners(Selected, Scene.SampleRadiusMm).Select(ToScreen).ToArray();
             for (int i = 0; i < 4; i++)
                 if (Distance(px, corners[i]) <= HandleRadius + 3)
                 {
@@ -501,11 +502,9 @@ public sealed class SceneView : FrameworkElement
     /// Drags one corner while the opposite one stays put, in the fixture's own turned frame
     /// so resizing a rotated rectangle still feels straight.
     ///
-    /// Only the sides that mean something can be dragged. A strip has a length and nothing
-    /// else - its band is as tall as the sampling radius makes it - and a ring seen edge-on
-    /// has only a height, because its width stopped mattering the moment it was turned. A
-    /// point has neither. Dragging what does not matter used to change numbers that changed
-    /// nothing on the case.
+    /// Both sides are draggable for every arrangement. Even where the drawing does not
+    /// change - a ring turned edge-on keeps its width - the rectangle is how the placement
+    /// and the spacing of the LEDs are described, and that has to remain settable.
     ///
     /// Proportions are free by default, since a strip really can be rectangular, and held
     /// with Shift for the shapes where the proportions are the point.
@@ -531,18 +530,9 @@ public sealed class SceneView : FrameworkElement
             newBoxH = boxH * scale;
         }
 
-        // back out of the box and into the spread of the LEDs themselves
-        bool canWidth = _before.Arrangement switch
-        {
-            Arrangement.Point => false,
-            Arrangement.Strip => true,
-            _ => !_before.EdgeOn
-        };
-
-        bool canHeight = _before.Arrangement is not (Arrangement.Point or Arrangement.Strip);
-
-        Selected.Width = canWidth ? Math.Max(1, newBoxW - 2 * reach) : _before.Width;
-        Selected.Height = canHeight ? Math.Max(1, newBoxH - 2 * reach) : _before.Height;
+        // back out of the box and into the rectangle of the fixture itself
+        Selected.Width = Math.Max(1, newBoxW - 2 * reach);
+        Selected.Height = Math.Max(1, newBoxH - 2 * reach);
 
         // the grabbed corner moved, the opposite one did not, so the centre follows the box
         var (grownW, grownH) = LedGeometry.BoxSize(Selected, reach);
@@ -589,10 +579,9 @@ public sealed class SceneView : FrameworkElement
         double left = m.CenterX - m.Width / 2, right = m.CenterX + m.Width / 2;
         double top = m.CenterY - m.Height / 2, bottom = m.CenterY + m.Height / 2;
 
-        // The LEDs are what is being placed, not the margin around them: a fixture lined up
-        // flush with the edge of the screen has to stay there, and the reading halo is
-        // allowed to hang over the edge - out there the coordinate is clamped anyway.
-        var corners = LedGeometry.Corners(f);
+        // By the frame, which is what is seen and dragged: snapping to something invisible
+        // would leave the fixture looking as if it still hung over the edge.
+        var corners = LedGeometry.BoxCorners(f, Scene.SampleRadiusMm);
         double x0 = corners.Min(c => c.X), x1 = corners.Max(c => c.X);
         double y0 = corners.Min(c => c.Y), y1 = corners.Max(c => c.Y);
 

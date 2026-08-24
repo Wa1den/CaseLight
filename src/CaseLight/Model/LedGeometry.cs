@@ -114,31 +114,16 @@ public static class LedGeometry
     }
 
     /// <summary>
-    /// How far the LEDs of a fixture actually spread, which is not always its rectangle.
-    ///
-    /// A strip runs along the middle line and has no height of its own; a ring seen
-    /// edge-on collapses the other way, onto a vertical line; a point has neither. Only the
-    /// dimensions that appear here mean anything, which is why the others cannot be dragged.
-    /// </summary>
-    public static (double Width, double Height) LedSpread(Fixture f) => f.Arrangement switch
-    {
-        Arrangement.Point => (0, 0),
-        Arrangement.Strip => (f.Width, 0),
-        _ => (f.EdgeOn ? 0 : f.Width, f.Height)
-    };
-
-    /// <summary>
-    /// The outline of a fixture as it is shown and grabbed: the LEDs plus the patch of
-    /// screen each one reads around itself.
+    /// The outline of a fixture as it is shown and grabbed: its own rectangle plus the
+    /// patch of screen each LED reads around itself.
     ///
     /// The margin is the sampling radius, so the box says what the fixture takes from the
-    /// picture rather than merely where its LEDs sit.
+    /// picture rather than merely where its LEDs sit. Both sides stay adjustable whatever
+    /// the arrangement: the rectangle is how the placement and the spacing of the LEDs are
+    /// described, and that is worth setting even where the drawing does not change.
     /// </summary>
-    public static (double Width, double Height) BoxSize(Fixture f, double reachMm)
-    {
-        var (w, h) = LedSpread(f);
-        return (w + 2 * reachMm, h + 2 * reachMm);
-    }
+    public static (double Width, double Height) BoxSize(Fixture f, double reachMm) =>
+        (f.Width + 2 * reachMm, f.Height + 2 * reachMm);
 
     /// <summary>The corners of that box on the scene, for drawing and for hit testing.</summary>
     public static Point[] BoxCorners(Fixture f, double reachMm)
