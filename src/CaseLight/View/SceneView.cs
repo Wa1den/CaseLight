@@ -589,7 +589,10 @@ public sealed class SceneView : FrameworkElement
         double left = m.CenterX - m.Width / 2, right = m.CenterX + m.Width / 2;
         double top = m.CenterY - m.Height / 2, bottom = m.CenterY + m.Height / 2;
 
-        var corners = LedGeometry.BoxCorners(f, Scene.SampleRadiusMm);
+        // The LEDs are what is being placed, not the margin around them: a fixture lined up
+        // flush with the edge of the screen has to stay there, and the reading halo is
+        // allowed to hang over the edge - out there the coordinate is clamped anyway.
+        var corners = LedGeometry.Corners(f);
         double x0 = corners.Min(c => c.X), x1 = corners.Max(c => c.X);
         double y0 = corners.Min(c => c.Y), y1 = corners.Max(c => c.Y);
 
