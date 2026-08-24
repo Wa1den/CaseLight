@@ -94,6 +94,22 @@ public sealed class CasePainter : IDisposable
     byte[] _sampled = Array.Empty<byte>();
     byte[] _output = Array.Empty<byte>();
 
+    /// <summary>
+    /// A copy of the last frame, kept for the canvas.
+    ///
+    /// A copy rather than the frame itself: the paint thread writes <see cref="_image"/> in
+    /// place, and the interface reading it while a new frame lands would show one picture
+    /// torn across another. Taken only when someone is looking - see
+    /// <see cref="PreviewWanted"/> - so the usual case pays nothing at all.
+    /// </summary>
+    readonly object _previewLock = new();
+    byte[] _preview = Array.Empty<byte>();
+    int _previewWidth, _previewHeight, _previewStride;
+    long _previewVersion;
+
+    /// <summary>Set by the window while the canvas is showing the screen.</summary>
+    public volatile bool PreviewWanted;
+
     public string Status { get; private set; } = "остановлено";
     public bool IsRunning => _running;
     public bool IsPaused => _paused;
@@ -124,6 +140,49 @@ public sealed class CasePainter : IDisposable
 
     /// <summary>Call after anything that moves a fixture or changes its LED count.</summary>
     public void Invalidate() => _rebuild = true;
+
+    /// <summary>
+    /// Hands out the last frame, if there is a newer one than the caller has seen.
+    /// </summary>
+    /// <returns>False when nothing has changed, so the canvas keeps what it already drew.</returns>
+    public bool TryTakePreview(ref byte[] destination, ref long version,
+                               out int width, out int height, out int stride)
+    {
+        lock (_previewLock)
+        {
+            width = _previewWidth;
+            height = _previewHeight;
+            stride = _previewStride;
+
+            if (_previewVersion == version || _preview.Length == 0) return false;
+
+            if (destination.Length < _preview.Length) destination = new byte[_preview.Length];
+            Array.Copy(_preview, destination, _preview.Length);
+
+            version = _previewVersion;
+            return true;
+        }
+    }
+
+    /// <summary>Keeps the canvas copy in step with the frame just sampled.</summary>
+    void KeepPreview(int width, int height, int stride)
+    {
+        if (!PreviewWanted) return;
+
+        int size = height * stride;
+        if (size <= 0 || size > _image.Length) return;
+
+        lock (_previewLock)
+        {
+            if (_preview.Length != size) _preview = new byte[size];
+            Array.Copy(_image, _preview, size);
+
+            _previewWidth = width;
+            _previewHeight = height;
+            _previewStride = stride;
+            _previewVersion++;
+        }
+    }
 
     public void UseScene(Scene scene)
     {
@@ -387,6 +446,7 @@ public sealed class CasePainter : IDisposable
         SourceInfo = $"свой захват ({_scene.CaptureSource}), {w}×{h}, экран {_captureMonitor}";
 
         ZoneSampler.Sample(_image, w, h, stride, _zones, _sampled);
+        KeepPreview(w, h, stride);
         return true;
     }
 
@@ -463,6 +523,7 @@ public sealed class CasePainter : IDisposable
         SourceInfo = $"Rimlight, {info.Width}×{info.Height}, экран {info.MonitorDeviceName}";
 
         ZoneSampler.Sample(_image, info.Width, info.Height, info.Stride, _zones, _sampled);
+        KeepPreview(info.Width, info.Height, info.Stride);
         return true;
     }
 

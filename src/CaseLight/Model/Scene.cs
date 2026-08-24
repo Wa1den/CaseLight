@@ -154,6 +154,16 @@ public sealed class Scene
     /// </summary>
     public bool ShowDisabled { get; set; } = true;
 
+    /// <summary>
+    /// Whether the captured frame is drawn on the canvas under the fixtures.
+    ///
+    /// The layout answers "which part of the screen does this LED watch" only in the
+    /// abstract; with the picture itself lying under the fixtures the answer is visible
+    /// directly. It is the reduced frame the painting already works from, so it costs a
+    /// copy and nothing else.
+    /// </summary>
+    public bool ShowScreen { get; set; }
+
     // ---- тест размещения --------------------------------------------------
 
     public TestShape TestShape { get; set; } = TestShape.Circle;

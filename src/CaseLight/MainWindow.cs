@@ -4,6 +4,7 @@ using System.Linq;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
+using System.Windows.Media.Imaging;
 using System.Windows.Threading;
 using CaseLight.Core.Capture;
 using CaseLight.Core.Power;
@@ -28,6 +29,17 @@ public sealed partial class MainWindow : Window
     readonly SceneView _view = new();
     readonly PowerWatcher _power = new();
     readonly DispatcherTimer _ui = new() { Interval = TimeSpan.FromMilliseconds(500) };
+
+    /// <summary>
+    /// Drives the picture on the canvas, and only while it is being shown.
+    ///
+    /// Separate from the interface tick because the two want different rates: status text
+    /// is fine twice a second, a picture at that rate looks broken.
+    /// </summary>
+    readonly DispatcherTimer _screen = new() { Interval = TimeSpan.FromMilliseconds(120) };
+
+    byte[] _screenBuffer = Array.Empty<byte>();
+    long _screenVersion;
 
     Scene _scene = Scene.Load();
     Scene _saved = null!;
@@ -137,6 +149,7 @@ public sealed partial class MainWindow : Window
             EnsureServer();
             ConnectHub();
             RebuildSections();
+            ApplyScreenPreview();
             SyncFixtureList();
             _view.FitToContent();
 
@@ -151,6 +164,8 @@ public sealed partial class MainWindow : Window
 
         _ui.Tick += (_, _) => RefreshUi();
         _ui.Start();
+
+        _screen.Tick += (_, _) => UpdateScreen();
 
         // a Windows shutdown must not be cancelled into the tray
         Application.Current.SessionEnding += (_, _) => _reallyClosing = true;
@@ -269,18 +284,32 @@ public sealed partial class MainWindow : Window
         grid.Children.Add(right);
 
         // ---- низ: действия и статус
-        var bottom = new StackPanel { Margin = new Thickness(12, 0, 12, 12), Orientation = Orientation.Horizontal };
-        bottom.Children.Add(Ui.Btn("Старт", StartPainting));
-        bottom.Children.Add(Ui.Btn("Стоп", StopPainting));
-        bottom.Children.Add(Ui.Btn("Переподключиться", ConnectHub));
-        bottom.Children.Add(Ui.Btn("Центрировать холст", () => _view.FitToContent()));
+        var bottom = new DockPanel { Margin = new Thickness(12, 0, 12, 12) };
+
+        var actions = new StackPanel { Orientation = Orientation.Horizontal };
+        actions.Children.Add(Ui.Btn("Старт", StartPainting));
+        actions.Children.Add(Ui.Btn("Стоп", StopPainting));
+        actions.Children.Add(Ui.Btn("Переподключиться", ConnectHub));
+        actions.Children.Add(Ui.Btn("Центрировать холст", () => _view.FitToContent()));
+        DockPanel.SetDock(actions, Dock.Left);
+        bottom.Children.Add(actions);
+
+        // Under the canvas rather than in the settings: it is a way of looking at the
+        // layout, switched on and off while working on it, not something to set once.
+        var screenToggle = Ui.Check("Отображать данные с экрана", _scene.ShowScreen,
+            v => { _scene.ShowScreen = v; ApplyScreenPreview(); Touch(); },
+            "На холст под фигурами выводится кадр, с которого берётся цвет: приглушённый и в том же уменьшенном виде, " +
+            "в каком его получает раскраска. Показывается, пока раскраска работает.");
+        if (screenToggle is FrameworkElement toggle) toggle.Margin = new Thickness(12, 0, 0, 0);
+        DockPanel.SetDock(screenToggle, Dock.Right);
+        bottom.Children.Add(screenToggle);
 
         _status = new TextBlock
         {
             Foreground = Ui.FgDim,
             FontSize = Ui.TextSize,
             VerticalAlignment = VerticalAlignment.Center,
-            Margin = new Thickness(12, 0, 0, 0),
+            Margin = new Thickness(12, 0, 12, 0),
             TextWrapping = TextWrapping.Wrap
         };
         bottom.Children.Add(_status);
@@ -396,6 +425,9 @@ public sealed partial class MainWindow : Window
         _pageHost.Content = _pages[selected];
 
         _rebuildingUi = false;
+
+        // the setting may have arrived from a cancel or an import, not from the checkbox
+        ApplyScreenPreview();
     }
 
     void BuildGeneralSection() => AddSection("Основное", "\uE713", panel =>
@@ -1082,6 +1114,55 @@ public sealed partial class MainWindow : Window
         {
             _settlePolls--;
         }
+    }
+
+    /// <summary>Starts or stops showing the screen on the canvas, per the setting.</summary>
+    void ApplyScreenPreview()
+    {
+        bool on = _scene.ShowScreen;
+        _painter.PreviewWanted = on;
+
+        if (on)
+        {
+            _screen.Start();
+            return;
+        }
+
+        _screen.Stop();
+        _view.Screen = null;
+        _view.InvalidateVisual();
+    }
+
+    /// <summary>
+    /// Puts the newest frame on the canvas.
+    ///
+    /// The frame is the reduced one the painting itself works from - a few hundred pixels
+    /// across - so building an image out of it every tick is cheaper than it looks, and it
+    /// is skipped entirely when nothing new has arrived.
+    /// </summary>
+    void UpdateScreen()
+    {
+        if (!_painter.IsRunning)
+        {
+            // nothing is being captured, and a frozen picture of what used to be on screen
+            // would be read as the current one
+            if (_view.Screen == null) return;
+
+            _view.Screen = null;
+            _view.InvalidateVisual();
+            return;
+        }
+
+        if (!_painter.TryTakePreview(ref _screenBuffer, ref _screenVersion, out int w, out int h, out int stride))
+            return;
+
+        if (w <= 0 || h <= 0 || stride <= 0) return;
+
+        var frame = BitmapSource.Create(w, h, 96, 96, PixelFormats.Bgra32, null, _screenBuffer, stride);
+        frame.Freeze();   // построен не в потоке отрисовки, поэтому только замороженным
+
+        _view.Screen = frame;
+        _view.InvalidateVisual();
     }
 
     void Say(string text) => _status.Text = text;

@@ -33,6 +33,15 @@ public sealed class SceneView : FrameworkElement
     /// </summary>
     public event EventHandler? FixtureEdited;
 
+    /// <summary>
+    /// The screen picture, drawn inside the monitor rectangle underneath everything else.
+    ///
+    /// Dimmed on purpose: it is there to say what the LEDs are looking at, and a picture at
+    /// full strength would drown the fixtures and their LEDs, which is what the canvas is
+    /// actually for.
+    /// </summary>
+    public ImageSource? Screen { get; set; }
+
     /// <summary>Pixels per millimetre.</summary>
     double _scale = 0.6;
     Point _origin = new(40, 40);
@@ -138,6 +147,7 @@ public sealed class SceneView : FrameworkElement
                          new Rect(0, 0, ActualWidth, ActualHeight));
 
         DrawGrid(dc);
+        DrawScreen(dc);
         DrawMonitor(dc);
 
         foreach (var f in Scene.Fixtures)
@@ -198,6 +208,19 @@ public sealed class SceneView : FrameworkElement
         for (double y = y0; y < ActualHeight; y += stepPx) dc.DrawLine(pen, new Point(0, y), new Point(ActualWidth, y));
     }
 
+    void DrawScreen(DrawingContext dc)
+    {
+        if (Screen == null) return;
+
+        var m = Scene.Monitor;
+        var tl = ToScreen(new Point(m.CenterX - m.Width / 2, m.CenterY - m.Height / 2));
+        var br = ToScreen(new Point(m.CenterX + m.Width / 2, m.CenterY + m.Height / 2));
+
+        dc.PushOpacity(0.45);
+        dc.DrawImage(Screen, new Rect(tl, br));
+        dc.Pop();
+    }
+
     void DrawMonitor(DrawingContext dc)
     {
         var m = Scene.Monitor;
@@ -207,7 +230,8 @@ public sealed class SceneView : FrameworkElement
 
         // No caption: the screen is the only rectangle of its kind on the canvas, and one
         // more word among the fixture labels is one more thing to read past.
-        dc.DrawRectangle(Ink(0.05), new Pen(Ink(0.35), 2), rect);
+        // no fill under the picture, it would only wash it out
+        dc.DrawRectangle(Screen == null ? Ink(0.05) : null, new Pen(Ink(0.35), 2), rect);
     }
 
     void DrawFixture(DrawingContext dc, Fixture f, bool selected)
