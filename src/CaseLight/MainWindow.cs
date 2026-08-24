@@ -556,14 +556,13 @@ public sealed partial class MainWindow : Window
 
         // ---- экран
         bool ourCapture = _scene.CaptureSource != CaptureSource.FromRimlight;
-        var monitors = Native.EnumerateMonitors();
+        var monitors = ScreenChoice.Monitors(fresh: true);
 
         var monitorBox = new ComboBox { Margin = new Thickness(0, 2, 0, 0), IsEnabled = ourCapture };
         foreach (var m in monitors) monitorBox.Items.Add(m.ToString());
 
-        int index = monitors.FindIndex(m => m.DeviceName == _scene.MonitorDeviceName);
-        if (index < 0) index = monitors.FindIndex(m => m.IsPrimary);
-        monitorBox.SelectedIndex = Math.Max(0, index);
+        var chosen = ScreenChoice.Find(_scene.MonitorDeviceName, _scene.MonitorModel);
+        monitorBox.SelectedIndex = Math.Max(0, monitors.FindIndex(m => m.DeviceName == chosen?.DeviceName));
 
         monitorBox.SelectionChanged += (_, _) =>
         {
@@ -571,6 +570,7 @@ public sealed partial class MainWindow : Window
             if (i < 0 || i >= monitors.Count) return;
 
             _scene.MonitorDeviceName = monitors[i].DeviceName;
+            _scene.MonitorModel = monitors[i].Model;
             AdoptScreen(monitors[i]);
 
             // the rectangle can change shape entirely - an ultrawide for a portrait screen -
@@ -1032,7 +1032,9 @@ public sealed partial class MainWindow : Window
         string name = _painter.BusMonitorDeviceName;
         if (string.IsNullOrEmpty(name) || name == _adoptedBusScreen) return;
 
-        var monitor = Native.EnumerateMonitors().FirstOrDefault(m => m.DeviceName == name);
+        var monitor = ScreenChoice.Monitors().FirstOrDefault(m => m.DeviceName == name)
+                   ?? ScreenChoice.Monitors(fresh: true).FirstOrDefault(m => m.DeviceName == name);
+
         if (monitor == null) return;
 
         _adoptedBusScreen = name;
@@ -1047,6 +1049,10 @@ public sealed partial class MainWindow : Window
         _view.InvalidateVisual();
         UpdateDirtyBar();
         Say($"Экран из Rimlight: {monitor.DisplayName}, {w:F0} × {h:F0} мм");
+
+        // the screen we are modelling has been settled by the bus, so remember which one
+        _scene.MonitorDeviceName = _saved.MonitorDeviceName = monitor.DeviceName;
+        _scene.MonitorModel = _saved.MonitorModel = monitor.Model;
     }
 
     /// <summary>Which bus screen has already been taken, so it is measured once.</summary>

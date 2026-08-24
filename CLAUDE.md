@@ -41,6 +41,7 @@ dotnet publish src/CaseLight/CaseLight.csproj -c Release -r win-x64 --self-conta
 | [Model/Fixture.cs](src/CaseLight/Model/Fixture.cs) | фигура: прямоугольник, форма раскладки диодов, привязка к железу (`Binding`) |
 | [Model/LedGeometry.cs](src/CaseLight/Model/LedGeometry.cs) | где сидит каждый диод: локально в 0..1, затем на сцене в мм; попадание мышью |
 | [Model/DisplaySize.cs](src/CaseLight/Model/DisplaySize.cs) | физический размер выбранного экрана из EDID, с поправкой на поворот |
+| [Model/ScreenChoice.cs](src/CaseLight/Model/ScreenChoice.cs) | какой экран выбран: по модели из EDID, а не по имени `\\.\DISPLAYn` |
 | [Model/Scene.cs](src/CaseLight/Model/Scene.cs) | всё состояние программы одним объектом: раскладка + все настройки, save/load/import |
 | [Render/CasePainter.cs](src/CaseLight/Render/CasePainter.cs) | поток раскраски: кадр → выборка зон → цветовой конвейер → OpenRGB |
 | [Rgb/RgbHub.cs](src/CaseLight/Rgb/RgbHub.cs) | единственное место, которое говорит с OpenRGB |
@@ -103,6 +104,12 @@ dotnet publish src/CaseLight/CaseLight.csproj -c Release -r win-x64 --self-conta
 **После сна железо нужно оставить в покое.** Контроллеры переучитываются, сервер держит
 старые ручки и рапортует об успехе в пустоту. Отсюда `ResumeDelayMs` (пауза перед первой
 записью) и `WakeRecovery.RestartServer` по умолчанию — грубо, но работает.
+
+**Имя экрана `\\.\DISPLAYn` — не идентификатор.** Windows раздаёт эти имена в порядке
+обнаружения выходов, и перестановка кабеля между разъёмами видеокарты их перенумеровывает:
+за одну сессию ультраширокий и портретный экраны поменялись именами. Выбранный экран
+хранится моделью из EDID (`Scene.MonitorModel`), имя остаётся только чтобы различить два
+одинаковых монитора. Разбор в [Model/ScreenChoice.cs](src/CaseLight/Model/ScreenChoice.cs).
 
 **Медленные шины.** Память сидит на SMBus; писать в неё каждый кадр — задерживать всё
 остальное. У каждой фигуры свой делитель `UpdateEvery`, устройство пишется по самому

@@ -46,6 +46,7 @@ public sealed class CasePainter : IDisposable
     long _captureVersion;
     CaptureSource _captureMode = CaptureSource.FromRimlight;
     string _captureMonitor = "";
+    string _captureLabel = "";
 
     Thread? _thread;
     volatile bool _running;
@@ -443,7 +444,7 @@ public sealed class CasePainter : IDisposable
 
         FramesReceived++;
         LastFrameAgeMs = 0;
-        SourceInfo = $"свой захват ({_scene.CaptureSource}), {w}×{h}, экран {_captureMonitor}";
+        SourceInfo = $"свой захват ({_scene.CaptureSource}), {w}×{h}, {_captureLabel}";
 
         ZoneSampler.Sample(_image, w, h, stride, _zones, _sampled);
         KeepPreview(w, h, stride);
@@ -453,20 +454,18 @@ public sealed class CasePainter : IDisposable
     /// <summary>Creates or re-creates the backend when the method or the screen changes.</summary>
     bool EnsureCapture()
     {
+        var wanted = ScreenChoice.Find(_scene.MonitorDeviceName, _scene.MonitorModel);
+        if (wanted == null) return false;
+
         bool same = _capture != null
                  && _captureMode == _scene.CaptureSource
-                 && _captureMonitor == _scene.MonitorDeviceName;
+                 && _captureMonitor == wanted.DeviceName;
 
         if (same) return true;
 
         StopCapture();
 
-        var monitors = Native.EnumerateMonitors();
-        var monitor = monitors.FirstOrDefault(m => m.DeviceName == _scene.MonitorDeviceName)
-                   ?? monitors.FirstOrDefault(m => m.IsPrimary)
-                   ?? monitors.FirstOrDefault();
-
-        if (monitor == null) return false;
+        var monitor = wanted;
 
         var mode = _scene.CaptureSource;
         _capture = new HybridBackend
@@ -482,7 +481,8 @@ public sealed class CasePainter : IDisposable
         _captureVersion = 0;
 
         _captureMode = mode;
-        _captureMonitor = _scene.MonitorDeviceName;
+        _captureMonitor = monitor.DeviceName;
+        _captureLabel = monitor.DisplayName;
 
         ProbeLog.Log("захват", $"свой захват {mode}, экран {monitor.DeviceName} {monitor.Width}x{monitor.Height}");
         return true;
@@ -520,7 +520,7 @@ public sealed class CasePainter : IDisposable
         FramesReceived++;
         LastFrameAgeMs = info.AgeMs;
         BusMonitorDeviceName = info.MonitorDeviceName;
-        SourceInfo = $"Rimlight, {info.Width}×{info.Height}, экран {info.MonitorDeviceName}";
+        SourceInfo = $"Rimlight, {info.Width}×{info.Height}, {ScreenChoice.Label(info.MonitorDeviceName)}";
 
         ZoneSampler.Sample(_image, info.Width, info.Height, info.Stride, _zones, _sampled);
         KeepPreview(info.Width, info.Height, info.Stride);

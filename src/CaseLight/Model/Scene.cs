@@ -121,6 +121,14 @@ public sealed class Scene
     /// <summary>Which screen to capture ourselves. Empty means the primary one.</summary>
     public string MonitorDeviceName { get; set; } = "";
 
+    /// <summary>
+    /// Model of that screen out of EDID, which is what actually identifies it.
+    ///
+    /// The device name beside it is not an identity: Windows renumbers the outputs when
+    /// cables move between ports. See <see cref="ScreenChoice"/>.
+    /// </summary>
+    public string MonitorModel { get; set; } = "";
+
     // ---- раскраска --------------------------------------------------------
 
     /// <summary>
