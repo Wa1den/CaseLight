@@ -369,6 +369,11 @@ public sealed partial class MainWindow : Window
         var panel = new StackPanel();
         build(panel);
 
+        // The card already keeps its own padding, and the first heading adds its gap on top
+        // of it - twice the space above the first group as between the rest.
+        if (panel.Children.Count > 0 && panel.Children[0] is FrameworkElement first)
+            first.Margin = new Thickness(first.Margin.Left, 0, first.Margin.Right, first.Margin.Bottom);
+
         AddSection(title, glyph, new ScrollViewer
         {
             VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
