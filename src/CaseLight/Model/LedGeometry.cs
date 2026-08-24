@@ -113,12 +113,47 @@ public static class LedGeometry
         return world;
     }
 
-    /// <summary>The fixture's four corners on the scene, for drawing and for hit testing.</summary>
-    public static Point[] Corners(Fixture f)
+    /// <summary>
+    /// How far the LEDs of a fixture actually spread, which is not always its rectangle.
+    ///
+    /// A strip runs along the middle line and has no height of its own; a ring seen
+    /// edge-on collapses the other way, onto a vertical line; a point has neither. Only the
+    /// dimensions that appear here mean anything, which is why the others cannot be dragged.
+    /// </summary>
+    public static (double Width, double Height) LedSpread(Fixture f) => f.Arrangement switch
+    {
+        Arrangement.Point => (0, 0),
+        Arrangement.Strip => (f.Width, 0),
+        _ => (f.EdgeOn ? 0 : f.Width, f.Height)
+    };
+
+    /// <summary>
+    /// The outline of a fixture as it is shown and grabbed: the LEDs plus the patch of
+    /// screen each one reads around itself.
+    ///
+    /// The margin is the sampling radius, so the box says what the fixture takes from the
+    /// picture rather than merely where its LEDs sit.
+    /// </summary>
+    public static (double Width, double Height) BoxSize(Fixture f, double reachMm)
+    {
+        var (w, h) = LedSpread(f);
+        return (w + 2 * reachMm, h + 2 * reachMm);
+    }
+
+    /// <summary>The corners of that box on the scene, for drawing and for hit testing.</summary>
+    public static Point[] BoxCorners(Fixture f, double reachMm)
+    {
+        var (w, h) = BoxSize(f, reachMm);
+        return Rect(f, w / 2, h / 2);
+    }
+
+    /// <summary>The fixture's four corners on the scene, without the sampling margin.</summary>
+    public static Point[] Corners(Fixture f) => Rect(f, f.Width / 2, f.Height / 2);
+
+    static Point[] Rect(Fixture f, double hw, double hh)
     {
         double rad = f.AngleDeg * Math.PI / 180.0;
         double cos = Math.Cos(rad), sin = Math.Sin(rad);
-        double hw = f.Width / 2, hh = f.Height / 2;
 
         var local = new[]
         {
@@ -146,9 +181,11 @@ public static class LedGeometry
         return new Point(dx * cos - dy * sin, dx * sin + dy * cos);
     }
 
-    public static bool HitTest(Fixture f, Point scene)
+    /// <summary>Whether the point lands on the fixture as it is drawn, margin included.</summary>
+    public static bool HitTest(Fixture f, Point scene, double reachMm)
     {
         var p = ToLocal(f, scene);
-        return Math.Abs(p.X) <= f.Width / 2 && Math.Abs(p.Y) <= f.Height / 2;
+        var (w, h) = BoxSize(f, reachMm);
+        return Math.Abs(p.X) <= w / 2 && Math.Abs(p.Y) <= h / 2;
     }
 }
