@@ -202,8 +202,24 @@ public sealed partial class MainWindow
         _fixturePanel.Children.Add(Ui.Header("Место в корпусе, мм"));
         _fixturePanel.Children.Add(Ui.Num("Центр по горизонтали", f.CenterX, v => { f.CenterX = v; Touch(); }));
         _fixturePanel.Children.Add(Ui.Num("Центр по вертикали", f.CenterY, v => { f.CenterY = v; Touch(); }));
-        _fixturePanel.Children.Add(Ui.Num("Ширина", f.Width, v => { f.Width = Math.Max(5, v); Touch(); }));
-        _fixturePanel.Children.Add(Ui.Num("Высота", f.Height, v => { f.Height = Math.Max(5, v); Touch(); }));
+        // Only the dimensions the arrangement actually has. Across a strip, or across a
+        // ring standing edge-on, the fixture is as wide as the sampling area covers, and a
+        // field for it would be a number that changes nothing.
+        if (f.Arrangement == Arrangement.Strip)
+        {
+            _fixturePanel.Children.Add(Ui.Num("Длина", f.Width, v => { f.Width = Math.Max(5, v); Touch(); },
+                "Поперёк полосы размер задаёт область выборки."));
+        }
+        else if (f.Arrangement == Arrangement.Closed && f.EdgeOn)
+        {
+            _fixturePanel.Children.Add(Ui.Num("Длина", f.Height, v => { f.Height = Math.Max(5, v); Touch(); },
+                "Кольцо видно с торца, поперёк размер задаёт область выборки."));
+        }
+        else if (f.Arrangement != Arrangement.Point)
+        {
+            _fixturePanel.Children.Add(Ui.Num("Ширина", f.Width, v => { f.Width = Math.Max(5, v); Touch(); }));
+            _fixturePanel.Children.Add(Ui.Num("Высота", f.Height, v => { f.Height = Math.Max(5, v); Touch(); }));
+        }
         _fixturePanel.Children.Add(Ui.Num("Поворот, градусов", f.AngleDeg, v => { f.AngleDeg = v; Touch(); }));
 
         // ---- раскладка

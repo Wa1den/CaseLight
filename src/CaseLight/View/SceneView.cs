@@ -502,12 +502,12 @@ public sealed class SceneView : FrameworkElement
     /// Drags one corner while the opposite one stays put, in the fixture's own turned frame
     /// so resizing a rotated rectangle still feels straight.
     ///
-    /// Both sides are draggable for every arrangement. Even where the drawing does not
-    /// change - a ring turned edge-on keeps its width - the rectangle is how the placement
-    /// and the spacing of the LEDs are described, and that has to remain settable.
+    /// A flat fixture has only a length: a strip and a ring seen edge-on are lines, and
+    /// across them the frame is as wide as the sampling area makes it, with nothing to set.
+    /// Both sides are draggable only for the shapes that really have two of them.
     ///
-    /// Proportions are free by default, since a strip really can be rectangular, and held
-    /// with Shift for the shapes where the proportions are the point.
+    /// Proportions are free by default, since a frame really can be oblong, and held with
+    /// Shift for the shapes where the proportions are the point.
     /// </summary>
     void Resize(Point sceneTo)
     {
@@ -530,9 +530,18 @@ public sealed class SceneView : FrameworkElement
             newBoxH = boxH * scale;
         }
 
-        // back out of the box and into the rectangle of the fixture itself
-        Selected.Width = Math.Max(1, newBoxW - 2 * reach);
-        Selected.Height = Math.Max(1, newBoxH - 2 * reach);
+        // back out of the box and into the spread of the LEDs themselves
+        bool canWidth = _before.Arrangement switch
+        {
+            Arrangement.Point => false,
+            Arrangement.Strip => true,
+            _ => !_before.EdgeOn
+        };
+
+        bool canHeight = _before.Arrangement is not (Arrangement.Point or Arrangement.Strip);
+
+        Selected.Width = canWidth ? Math.Max(1, newBoxW - 2 * reach) : _before.Width;
+        Selected.Height = canHeight ? Math.Max(1, newBoxH - 2 * reach) : _before.Height;
 
         // the grabbed corner moved, the opposite one did not, so the centre follows the box
         var (grownW, grownH) = LedGeometry.BoxSize(Selected, reach);

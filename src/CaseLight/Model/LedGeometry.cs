@@ -114,16 +114,32 @@ public static class LedGeometry
     }
 
     /// <summary>
-    /// The outline of a fixture as it is shown and grabbed: its own rectangle plus the
-    /// patch of screen each LED reads around itself.
+    /// How far the LEDs of a fixture reach, which is not always its rectangle.
     ///
-    /// The margin is the sampling radius, so the box says what the fixture takes from the
-    /// picture rather than merely where its LEDs sit. Both sides stay adjustable whatever
-    /// the arrangement: the rectangle is how the placement and the spacing of the LEDs are
-    /// described, and that is worth setting even where the drawing does not change.
+    /// A strip runs along its middle line and has no thickness of its own; a ring seen
+    /// edge-on collapses the other way, onto a vertical line. Across such a fixture there
+    /// is nothing to set - what it covers there is decided by the sampling area alone.
     /// </summary>
-    public static (double Width, double Height) BoxSize(Fixture f, double reachMm) =>
-        (f.Width + 2 * reachMm, f.Height + 2 * reachMm);
+    public static (double Width, double Height) LedSpread(Fixture f) => f.Arrangement switch
+    {
+        Arrangement.Point => (0, 0),
+        Arrangement.Strip => (f.Width, 0),
+        _ => (f.EdgeOn ? 0 : f.Width, f.Height)
+    };
+
+    /// <summary>
+    /// The outline of a fixture as it is shown and grabbed: where the LEDs reach, plus the
+    /// patch of screen each one averages around itself.
+    ///
+    /// The margin is the sampling value on every side, so a flat fixture ends up exactly as
+    /// wide across as the sampling covers. That is not half of it by accident: the painting
+    /// takes u ± radius around each LED, so the patch really is twice the number shown.
+    /// </summary>
+    public static (double Width, double Height) BoxSize(Fixture f, double reachMm)
+    {
+        var (w, h) = LedSpread(f);
+        return (w + 2 * reachMm, h + 2 * reachMm);
+    }
 
     /// <summary>The corners of that box on the scene, for drawing and for hit testing.</summary>
     public static Point[] BoxCorners(Fixture f, double reachMm)
