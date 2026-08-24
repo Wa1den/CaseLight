@@ -46,6 +46,7 @@ dotnet publish src/CaseLight/CaseLight.csproj -c Release -r win-x64 --self-conta
 | [Render/CasePainter.cs](src/CaseLight/Render/CasePainter.cs) | поток раскраски: кадр → выборка зон → цветовой конвейер → OpenRGB |
 | [Rgb/RgbHub.cs](src/CaseLight/Rgb/RgbHub.cs) | единственное место, которое говорит с OpenRGB |
 | [Rgb/OpenRgbLauncher.cs](src/CaseLight/Rgb/OpenRgbLauncher.cs) | найти, запустить, остановить, перезапустить сервер |
+| [Rgb/OpenRgbTask.cs](src/CaseLight/Rgb/OpenRgbTask.cs) | задание планировщика: сервер стартует при входе с правами, без UAC |
 | [View/SceneView.cs](src/CaseLight/View/SceneView.cs) | холст: монитор, фигуры, отдельные диоды; перетаскивание, поворот, размер |
 | [MainWindow.cs](src/CaseLight/MainWindow.cs) | окно, разделы настроек, трей, питание, восстановление после сна |
 | [MainWindow.Fixture.cs](src/CaseLight/MainWindow.Fixture.cs) | панель фигуры, раздел цветов, тест размещения |
@@ -110,6 +111,12 @@ dotnet publish src/CaseLight/CaseLight.csproj -c Release -r win-x64 --self-conta
 за одну сессию ультраширокий и портретный экраны поменялись именами. Выбранный экран
 хранится моделью из EDID (`Scene.MonitorModel`), имя остаётся только чтобы различить два
 одинаковых монитора. Разбор в [Model/ScreenChoice.cs](src/CaseLight/Model/ScreenChoice.cs).
+
+**Габарит фигуры на холсте — это диоды плюс область выборки.** Раскраска берёт участок
+`u ± SampleRadiusMm` вокруг каждого диода, поэтому рамка отстоит от них ровно на это
+значение с каждой стороны и показывает, что фигура читает. У плоских форм — полосы и
+кольца, стоящего ребром, — поперёк задавать нечего: там весь размер даёт область выборки,
+и тянется только длина.
 
 **Медленные шины.** Память сидит на SMBus; писать в неё каждый кадр — задерживать всё
 остальное. У каждой фигуры свой делитель `UpdateEvery`, устройство пишется по самому

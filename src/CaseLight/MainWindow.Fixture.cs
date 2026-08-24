@@ -256,7 +256,7 @@ public sealed partial class MainWindow
             if (!f.RoundContour)
                 _fixturePanel.Children.Add(Ui.Slide("Пропорции рамки", AspectToScale(f.ContourAspect), -10, 10, 0.1,
                     v => { f.ContourAspect = ScaleToAspect(v); Touch(); }, "",
-                    "Пропорции самой рамки, а не её места на плане: у рамки тройного вентилятора это втрое выше.",
+                    "Физические пропорции устройства, если оно не квадратное: у рамки тройного вентилятора это примерно втрое выше.",
                     format: DescribeAspect));
         }
 
