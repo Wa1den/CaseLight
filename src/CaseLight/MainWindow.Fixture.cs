@@ -1,4 +1,5 @@
 using System;
+using System.Globalization;
 using System.Linq;
 using System.Windows;
 using System.Windows.Controls;
@@ -253,9 +254,10 @@ public sealed partial class MainWindow
             _fixturePanel.Children.Add(Ui.Check("Контур круглый", f.RoundContour, v => { f.RoundContour = v; BuildFixturePanel(); Touch(); }));
 
             if (!f.RoundContour)
-                _fixturePanel.Children.Add(Ui.Num("Пропорция рамки (высота ÷ ширина)", f.ContourAspect,
-                                                  v => { f.ContourAspect = Math.Max(0.05, v); Touch(); },
-                    "Пропорции самой рамки: у тройного вентилятора примерно 3."));
+                _fixturePanel.Children.Add(Ui.Slide("Пропорции рамки", AspectToScale(f.ContourAspect), -10, 10, 0.1,
+                    v => { f.ContourAspect = ScaleToAspect(v); Touch(); }, "",
+                    "Пропорции самой рамки, а не её места на плане: у рамки тройного вентилятора это втрое выше.",
+                    format: DescribeAspect));
         }
 
         if (f.Arrangement != Arrangement.Point)
@@ -416,6 +418,27 @@ public sealed partial class MainWindow
 
         panel.Children.Add(Ui.Row(swatch, Ui.Btn("Выбрать цвет…", () => PickTestColor(swatch))));
     });
+
+    /// <summary>
+    /// The contour aspect as a signed number: taller than wide reads positive, wider than
+    /// tall reads negative.
+    ///
+    /// Stored it is height over width, where a frame three times wider is 0.33 - a number
+    /// nobody reads as "three times wider". The sign says which way round, the size says by
+    /// how much, and one is the square in the middle.
+    /// </summary>
+    static double AspectToScale(double aspect) =>
+        aspect >= 1 ? Math.Min(10, aspect) : -Math.Min(10, 1 / Math.Max(0.0001, aspect));
+
+    static double ScaleToAspect(double scale) =>
+        scale >= 1 ? scale
+        : scale <= -1 ? 1 / -scale
+        : 1;
+
+    static string DescribeAspect(double scale) =>
+        scale >= 1.05 ? $"выше ×{scale.ToString("0.#", CultureInfo.InvariantCulture)}"
+        : scale <= -1.05 ? $"шире ×{(-scale).ToString("0.#", CultureInfo.InvariantCulture)}"
+        : "квадрат";
 
     static Color ParseColor(string hex)
     {

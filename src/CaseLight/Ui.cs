@@ -231,9 +231,13 @@ public static class Ui
     }
 
     /// <summary>A slider that shows its own value - otherwise it is a guess with a handle.</summary>
+    /// <param name="format">
+    /// Turns the number into what it means, when the number alone does not say it. A ratio
+    /// of 0.33 is a frame three times wider than it is tall, and nobody reads it that way.
+    /// </param>
     public static UIElement Slide(string label, double value, double min, double max,
                                   double step, Action<double> set, string suffix = "",
-                                  string? help = null)
+                                  string? help = null, Func<double, string>? format = null)
     {
         var caption = new TextBlock { Foreground = FgDim, FontSize = TextSize };
         var slider = new Slider
@@ -243,10 +247,17 @@ public static class Ui
             Value = Math.Clamp(value, min, max),
             TickFrequency = step,
             IsSnapToTickEnabled = step > 0,
+
+            // otherwise the arrow keys and the wheel move by WPF's own tenth of a unit and
+            // fight the snapping, which feels like a slider that will not budge
+            SmallChange = step,
+            LargeChange = step * 5,
             Margin = new Thickness(0, 2, 0, 0)
         };
 
-        void Show() => caption.Text = $"{label}: {slider.Value.ToString("0.##", CultureInfo.InvariantCulture)}{suffix}";
+        void Show() => caption.Text = label + ": " + (format != null
+            ? format(slider.Value)
+            : slider.Value.ToString("0.##", CultureInfo.InvariantCulture) + suffix);
         Show();
 
         slider.ValueChanged += (_, _) => { Show(); set(slider.Value); };

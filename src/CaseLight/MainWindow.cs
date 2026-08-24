@@ -589,7 +589,7 @@ public sealed partial class MainWindow : Window
         panel.Children.Add(Ui.Slide("Кадров в секунду", _scene.MaxFps, 1, 120, 1, v => { _scene.MaxFps = (int)v; Touch(); }, "",
             "Верхний предел для быстрых устройств. Медленным задаётся свой делитель в параметрах фигуры."));
 
-        panel.Children.Add(Ui.Slide("Область выборки", _scene.SampleRadiusMm, 5, 400, 5,
+        panel.Children.Add(Ui.Slide("Область выборки", _scene.SampleRadiusMm, 1, 100, 1,
             v => { _scene.SampleRadiusMm = Math.Max(1, v); ShowSampleArea(); Touch(); }, " мм",
             "Размер участка экрана, усредняемого для одного диода. При малом значении цвет меняется от любого движения в кадре, при большом усредняется до однородного оттенка."));
 
