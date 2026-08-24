@@ -42,6 +42,15 @@ public sealed class SceneView : FrameworkElement
     /// </summary>
     public ImageSource? Screen { get; set; }
 
+    /// <summary>
+    /// The sampling radius, drawn at the centre of the screen while it is being chosen.
+    ///
+    /// The number alone says nothing: sixty millimetres is a lot on a small panel and very
+    /// little on an ultrawide. Against the rectangle of the screen it needs no explaining.
+    /// </summary>
+    public bool ShowSampleArea { get; set; }
+    public double SampleAreaMm { get; set; }
+
     /// <summary>Pixels per millimetre.</summary>
     double _scale = 0.6;
     Point _origin = new(40, 40);
@@ -132,6 +141,19 @@ public sealed class SceneView : FrameworkElement
     static Color ThemedColor(string key) =>
         Themed(key) is SolidColorBrush b ? b.Color : Colors.Gray;
 
+    /// <summary>
+    /// The accent colour, taken from a brush rather than a colour token.
+    ///
+    /// The Fluent theme publishes its accents only as brushes - there is no
+    /// <c>AccentTextFillColorPrimary</c> colour to bind to, which was measured rather than
+    /// assumed. Asking for the colour that is not there gives a transparent one, and a
+    /// transparent circle is a circle nobody can see.
+    /// </summary>
+    static Color AccentColour =>
+        Application.Current?.TryFindResource("AccentTextFillColorPrimaryBrush") is SolidColorBrush b
+            ? b.Color
+            : ThemedColor("Warn");
+
     /// <summary>The foreground colour at a given transparency, for fills and faint outlines.</summary>
     static Brush Ink(double opacity)
     {
@@ -156,6 +178,7 @@ public sealed class SceneView : FrameworkElement
 
         if (Selected != null && !TestMode) DrawHandles(dc, Selected);
         if (TestMode) DrawTestPatch(dc);
+        if (ShowSampleArea) DrawSampleArea(dc);
     }
 
     /// <summary>
@@ -206,6 +229,21 @@ public sealed class SceneView : FrameworkElement
         double x0 = _origin.X % stepPx, y0 = _origin.Y % stepPx;
         for (double x = x0; x < ActualWidth; x += stepPx) dc.DrawLine(pen, new Point(x, 0), new Point(x, ActualHeight));
         for (double y = y0; y < ActualHeight; y += stepPx) dc.DrawLine(pen, new Point(0, y), new Point(ActualWidth, y));
+    }
+
+    /// <summary>The patch of screen one LED averages, put where it can be compared to the screen.</summary>
+    void DrawSampleArea(DrawingContext dc)
+    {
+        var m = Scene.Monitor;
+        var centre = ToScreen(new Point(m.CenterX, m.CenterY));
+        double r = Math.Max(1, SampleAreaMm * _scale);
+
+        var colour = AccentColour;
+        var fill = new SolidColorBrush(Color.FromArgb(60, colour.R, colour.G, colour.B));
+        var pen = new Pen(new SolidColorBrush(colour), 2);
+
+        dc.DrawEllipse(fill, pen, centre, r, r);
+        Label(dc, $"область выборки {SampleAreaMm:F0} мм", new Point(centre.X + r + 8, centre.Y - 8), colour, 13);
     }
 
     void DrawScreen(DrawingContext dc)

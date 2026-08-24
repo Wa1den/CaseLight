@@ -239,7 +239,7 @@ public sealed partial class MainWindow
             if (!f.RoundContour)
                 _fixturePanel.Children.Add(Ui.Num("Пропорция рамки (высота ÷ ширина)", f.ContourAspect,
                                                   v => { f.ContourAspect = Math.Max(0.05, v); Touch(); },
-                    "Пропорции самой рамки, а не её места на плане. У рамки тройного вентилятора это примерно 3."));
+                    "Пропорции самой рамки: у тройного вентилятора примерно 3."));
         }
 
         if (f.Arrangement != Arrangement.Point)
@@ -251,7 +251,7 @@ public sealed partial class MainWindow
         if (f.Arrangement == Arrangement.Closed)
         {
             _fixturePanel.Children.Add(Ui.Check("Обращена ребром к наблюдателю", f.EdgeOn, v => { f.EdgeOn = v; BuildFixturePanel(); Touch(); },
-                "Кольцо видно с торца и сводится к вертикальной линии: от начального диода высота растёт в обе стороны и сходится наверху. Ширина фигуры на цвет тогда не влияет."));
+                "Кольцо сводится к вертикальной линии, ширина фигуры на цвет тогда не влияет."));
         }
     }
 

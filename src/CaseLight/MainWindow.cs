@@ -41,6 +41,9 @@ public sealed partial class MainWindow : Window
     byte[] _screenBuffer = Array.Empty<byte>();
     long _screenVersion;
 
+    /// <summary>Takes the sampling circle off the canvas once the value has settled.</summary>
+    readonly DispatcherTimer _sampleHint = new() { Interval = TimeSpan.FromMilliseconds(1200) };
+
     Scene _scene = Scene.Load();
     Scene _saved = null!;
     CasePainter _painter = null!;
@@ -166,6 +169,13 @@ public sealed partial class MainWindow : Window
         _ui.Start();
 
         _screen.Tick += (_, _) => UpdateScreen();
+
+        _sampleHint.Tick += (_, _) =>
+        {
+            _sampleHint.Stop();
+            _view.ShowSampleArea = false;
+            _view.InvalidateVisual();
+        };
 
         // a Windows shutdown must not be cancelled into the tray
         Application.Current.SessionEnding += (_, _) => _reallyClosing = true;
@@ -298,8 +308,7 @@ public sealed partial class MainWindow : Window
         // layout, switched on and off while working on it, not something to set once.
         var screenToggle = Ui.Check("Отображать данные с экрана", _scene.ShowScreen,
             v => { _scene.ShowScreen = v; ApplyScreenPreview(); Touch(); },
-            "На холст под фигурами выводится кадр, с которого берётся цвет: приглушённый и в том же уменьшенном виде, " +
-            "в каком его получает раскраска. Показывается, пока раскраска работает.");
+            "Требует запущенной раскраски.");
         if (screenToggle is FrameworkElement toggle) toggle.Margin = new Thickness(12, 0, 0, 0);
         DockPanel.SetDock(screenToggle, Dock.Right);
         bottom.Children.Add(screenToggle);
@@ -580,7 +589,8 @@ public sealed partial class MainWindow : Window
         panel.Children.Add(Ui.Slide("Кадров в секунду", _scene.MaxFps, 1, 120, 1, v => { _scene.MaxFps = (int)v; Touch(); }, "",
             "Верхний предел для быстрых устройств. Медленным задаётся свой делитель в параметрах фигуры."));
 
-        panel.Children.Add(Ui.Num("Область выборки, мм", _scene.SampleRadiusMm, v => { _scene.SampleRadiusMm = Math.Max(1, v); Touch(); },
+        panel.Children.Add(Ui.Slide("Область выборки", _scene.SampleRadiusMm, 5, 400, 5,
+            v => { _scene.SampleRadiusMm = Math.Max(1, v); ShowSampleArea(); Touch(); }, " мм",
             "Размер участка экрана, усредняемого для одного диода. При малом значении цвет меняется от любого движения в кадре, при большом усредняется до однородного оттенка."));
 
         panel.Children.Add(Ui.Header("Статистика"));
@@ -1114,6 +1124,23 @@ public sealed partial class MainWindow : Window
         {
             _settlePolls--;
         }
+    }
+
+    /// <summary>
+    /// Puts the sampling circle on the canvas and takes it away once the value stops moving.
+    ///
+    /// Tied to the value rather than to the mouse: the slider answers to the wheel and to
+    /// the arrow keys as well, and a hint that appears for only one of the three ways of
+    /// using it would look broken.
+    /// </summary>
+    void ShowSampleArea()
+    {
+        _view.SampleAreaMm = _scene.SampleRadiusMm;
+        _view.ShowSampleArea = true;
+        _view.InvalidateVisual();
+
+        _sampleHint.Stop();
+        _sampleHint.Start();
     }
 
     /// <summary>Starts or stops showing the screen on the canvas, per the setting.</summary>
