@@ -185,6 +185,9 @@ public sealed class Scene
     /// </summary>
     public bool ShowScreen { get; set; }
 
+    /// <summary>Whether the canvas is shown at all, or the window is just the settings.</summary>
+    public bool ShowCanvas { get; set; } = true;
+
     // ---- тест размещения --------------------------------------------------
 
     public TestShape TestShape { get; set; } = TestShape.Circle;

@@ -53,6 +53,18 @@ public sealed partial class MainWindow : Window
     ListBox _nav = null!;
     ContentControl _pageHost = null!;
     readonly List<UIElement> _pages = new();
+
+    ColumnDefinition _canvasColumn = null!;
+    Grid _canvasHost = null!;
+    UIElement _fitButton = null!;
+    UIElement _screenToggle = null!;
+
+    /// <summary>Window width with the canvas open, to come back to when it is shown again.</summary>
+    double _wideWidth;
+    bool? _canvasShown;
+
+    /// <summary>Narrower than this the canvas has no room worth the name.</summary>
+    const double WideMinWidth = 1100;
     Border _dirtyBar = null!;
     Border _fixtureOverlay = null!;
     StackPanel _fixturePanel = null!;
@@ -153,6 +165,7 @@ public sealed partial class MainWindow : Window
             ConnectHub();
             RebuildSections();
             ApplyScreenPreview();
+            ApplyCanvasVisibility();
             SyncFixtureList();
             _view.FitToContent();
 
@@ -216,7 +229,9 @@ public sealed partial class MainWindow : Window
         var grid = new Grid();
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(440) });
-        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+
+        _canvasColumn = new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) };
+        grid.ColumnDefinitions.Add(_canvasColumn);
         grid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
         grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
 
@@ -225,8 +240,7 @@ public sealed partial class MainWindow : Window
         {
             Background = Brushes.Transparent,
             BorderThickness = new Thickness(0),
-            VerticalAlignment = VerticalAlignment.Top,
-            Margin = new Thickness(6, 12, 6, 12)
+            VerticalAlignment = VerticalAlignment.Top
         };
         ScrollViewer.SetHorizontalScrollBarVisibility(_nav, ScrollBarVisibility.Disabled);
 
@@ -251,8 +265,20 @@ public sealed partial class MainWindow : Window
             HideFixturePanel();
         };
 
-        Grid.SetColumn(_nav, 0);
-        grid.Children.Add(_nav);
+        // The canvas switch lives under the sections rather than in them: it is about the
+        // shape of the window, not about any one page.
+        var canvasToggle = Ui.Check("Отображать холст", _scene.ShowCanvas,
+            v => { _scene.ShowCanvas = v; ApplyCanvasVisibility(); Touch(); });
+
+        if (canvasToggle is FrameworkElement toggle) toggle.Margin = new Thickness(12, 12, 0, 0);
+        DockPanel.SetDock(canvasToggle, Dock.Bottom);
+
+        var rail = new DockPanel { Margin = new Thickness(6, 12, 6, 12) };
+        rail.Children.Add(canvasToggle);
+        rail.Children.Add(_nav);
+
+        Grid.SetColumn(rail, 0);
+        grid.Children.Add(rail);
 
         // ---- по центру: страница выбранного раздела и полоса применения
         var page = new Grid { Margin = new Thickness(0, 12, 12, 12) };
@@ -272,6 +298,7 @@ public sealed partial class MainWindow : Window
 
         // ---- справа: холст и панель фигуры поверх него
         var right = new Grid { Margin = new Thickness(0, 12, 12, 12) };
+        _canvasHost = right;
         right.Children.Add(_view);
 
         // The Fluent scroll bar is drawn over the content instead of taking a column of
@@ -299,8 +326,9 @@ public sealed partial class MainWindow : Window
         var actions = new StackPanel { Orientation = Orientation.Horizontal };
         actions.Children.Add(Ui.Btn("Старт", StartPainting));
         actions.Children.Add(Ui.Btn("Стоп", StopPainting));
-        actions.Children.Add(Ui.Btn("Переподключиться", ConnectHub));
-        actions.Children.Add(Ui.Btn("Центрировать холст", () => _view.FitToContent()));
+
+        _fitButton = Ui.Btn("Центрировать холст", () => _view.FitToContent());
+        actions.Children.Add(_fitButton);
         DockPanel.SetDock(actions, Dock.Left);
         bottom.Children.Add(actions);
 
@@ -309,9 +337,10 @@ public sealed partial class MainWindow : Window
         var screenToggle = Ui.Check("Отображать данные с экрана", _scene.ShowScreen,
             v => { _scene.ShowScreen = v; ApplyScreenPreview(); Touch(); },
             "Требует запущенной раскраски.");
-        if (screenToggle is FrameworkElement toggle) toggle.Margin = new Thickness(12, 0, 0, 0);
+        if (screenToggle is FrameworkElement box) box.Margin = new Thickness(12, 0, 0, 0);
         DockPanel.SetDock(screenToggle, Dock.Right);
         bottom.Children.Add(screenToggle);
+        _screenToggle = screenToggle;
 
         _status = new TextBlock
         {
@@ -440,8 +469,9 @@ public sealed partial class MainWindow : Window
 
         _rebuildingUi = false;
 
-        // the setting may have arrived from a cancel or an import, not from the checkbox
+        // the settings may have arrived from a cancel or an import, not from a checkbox
         ApplyScreenPreview();
+        ApplyCanvasVisibility();
     }
 
     void BuildGeneralSection() => AddSection("Основное", "\uE713", panel =>
@@ -480,7 +510,8 @@ public sealed partial class MainWindow : Window
             string? found = OpenRgbLauncher.FindExe();
             Say(found == null ? "OpenRGB.exe не найден, укажите путь вручную" : "Найден: " + found);
         }), Ui.Btn("Запустить сейчас", () => Say(OpenRgbLauncher.Launch(
-            string.IsNullOrWhiteSpace(_scene.OpenRgbPath) ? null : _scene.OpenRgbPath, _scene.OpenRgbAsAdmin)))));
+            string.IsNullOrWhiteSpace(_scene.OpenRgbPath) ? null : _scene.OpenRgbPath, _scene.OpenRgbAsAdmin))),
+            Ui.Btn("Переподключиться", ConnectHub)));
 
         panel.Children.Add(Ui.Header("Настройки",
             "Один файл со всем: раскладка, размеры монитора, цвета, захват, питание."));
@@ -1154,6 +1185,52 @@ public sealed partial class MainWindow : Window
         _sampleHint.Start();
     }
 
+    /// <summary>
+    /// Shows or hides the canvas, and gives the window back the width it had.
+    ///
+    /// The width has to be handed over twice. While the canvas is hidden the window sizes
+    /// itself to its content, so the Width property still holds the number from before and
+    /// assigning that same number changes nothing at all. Going through ActualWidth first
+    /// makes the second assignment a real change - a trick worth remembering, since without
+    /// it the window simply stays narrow and looks broken.
+    /// </summary>
+    void ApplyCanvasVisibility()
+    {
+        bool show = _scene.ShowCanvas;
+        if (_canvasShown == show) return;
+        _canvasShown = show;
+
+        _fitButton.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
+        _screenToggle.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
+
+        // A wrapping text block asked for its size without a width to fit into answers with
+        // the whole line unwrapped, so without a ceiling the longest status would decide how
+        // wide the window sizes itself to.
+        _status.MaxWidth = show ? double.PositiveInfinity : 380;
+
+        if (show)
+        {
+            _canvasHost.Visibility = Visibility.Visible;
+            _canvasColumn.Width = new GridLength(1, GridUnitType.Star);
+
+            SizeToContent = SizeToContent.Manual;
+            MinWidth = WideMinWidth;
+
+            Width = ActualWidth;
+            Width = Math.Max(WideMinWidth, _wideWidth);
+            return;
+        }
+
+        if (IsLoaded && WindowState == WindowState.Normal && ActualWidth >= WideMinWidth)
+            _wideWidth = ActualWidth;
+
+        _canvasHost.Visibility = Visibility.Collapsed;
+        _canvasColumn.Width = new GridLength(0);
+
+        MinWidth = 0;
+        SizeToContent = SizeToContent.Width;
+    }
+
     /// <summary>Starts or stops showing the screen on the canvas, per the setting.</summary>
     void ApplyScreenPreview()
     {
@@ -1334,10 +1411,12 @@ public sealed partial class MainWindow : Window
 
     void RestoreWindowGeometry()
     {
-        Width = Math.Max(1100, _scene.WindowWidth);
+        Width = Math.Max(WideMinWidth, _scene.WindowWidth);
         Height = Math.Max(700, _scene.WindowHeight);
-        MinWidth = 1100;
+        MinWidth = WideMinWidth;
         MinHeight = 700;
+
+        _wideWidth = Width;
 
         if (_scene.WindowLeft is double left && _scene.WindowTop is double top)
         {
