@@ -56,6 +56,7 @@ public sealed partial class MainWindow : Window
 
     ColumnDefinition _canvasColumn = null!;
     Grid _canvasHost = null!;
+    DockPanel _rail = null!;
     UIElement _fitButton = null!;
     UIElement _screenToggle = null!;
 
@@ -65,6 +66,9 @@ public sealed partial class MainWindow : Window
 
     /// <summary>Narrower than this the canvas has no room worth the name.</summary>
     const double WideMinWidth = 1100;
+
+    /// <summary>Width of the settings page, the same with the canvas and without it.</summary>
+    const double PageWidth = 440;
     Border _dirtyBar = null!;
     Border _fixtureOverlay = null!;
     StackPanel _fixturePanel = null!;
@@ -228,12 +232,10 @@ public sealed partial class MainWindow : Window
     {
         var grid = new Grid();
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(440) });
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(PageWidth) });
 
         _canvasColumn = new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) };
         grid.ColumnDefinitions.Add(_canvasColumn);
-        grid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
-        grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
 
         // ---- слева: столбец разделов шириной по самой длинной подписи
         _nav = new ListBox
@@ -273,12 +275,12 @@ public sealed partial class MainWindow : Window
         if (canvasToggle is FrameworkElement toggle) toggle.Margin = new Thickness(12, 12, 0, 0);
         DockPanel.SetDock(canvasToggle, Dock.Bottom);
 
-        var rail = new DockPanel { Margin = new Thickness(6, 12, 6, 12) };
-        rail.Children.Add(canvasToggle);
-        rail.Children.Add(_nav);
+        _rail = new DockPanel { Margin = new Thickness(6, 12, 6, 12) };
+        _rail.Children.Add(canvasToggle);
+        _rail.Children.Add(_nav);
 
-        Grid.SetColumn(rail, 0);
-        grid.Children.Add(rail);
+        Grid.SetColumn(_rail, 0);
+        grid.Children.Add(_rail);
 
         // ---- по центру: страница выбранного раздела и полоса применения
         var page = new Grid { Margin = new Thickness(0, 12, 12, 12) };
@@ -358,11 +360,16 @@ public sealed partial class MainWindow : Window
         };
         bottom.Children.Add(_status);
 
-        Grid.SetRow(bottom, 1);
-        Grid.SetColumnSpan(bottom, 3);
-        grid.Children.Add(bottom);
+        // The bar is kept out of the grid on purpose. Spanning it across the columns made
+        // its own width a claim on them, and the first column is auto-sized: one status line
+        // about a lost connection stretched that column until the settings page hung off the
+        // right edge of the window. Docked here it takes what the window has, no more.
+        var root = new DockPanel();
+        DockPanel.SetDock(bottom, Dock.Bottom);
+        root.Children.Add(bottom);
+        root.Children.Add(grid);
 
-        return grid;
+        return root;
     }
 
     Border BuildDirtyBar()
@@ -956,7 +963,7 @@ public sealed partial class MainWindow : Window
         // Stop writing before touching the server: a restart would be writing into a dying
         // process.
         _painter.Pause("восстановление после сна");
-        Say("Пробуждение: восстановление связи с OpenRGB.");
+        Say("Пробуждение: восстановление связи с OpenRGB.", 6000);
 
         System.Threading.Tasks.Task.Run(() =>
         {
@@ -1041,7 +1048,7 @@ public sealed partial class MainWindow : Window
     {
         PollDevices();
 
-        if (_painter.IsRunning) Say(_painter.Status);
+        if (_painter.IsRunning) SayFromTick(_painter.Status);
 
         if (_statValues.Length == StatRows.Length)
         {
@@ -1128,7 +1135,7 @@ public sealed partial class MainWindow : Window
 
             if (_serverStartedTicks > 0 && now - _serverStartedTicks < OpenRgbLauncher.TypicalStartupMs)
             {
-                Say("OpenRGB запускается, идёт поиск устройств.");
+                SayFromTick("OpenRGB запускается, идёт поиск устройств.", 1200);
                 return;
             }
 
@@ -1136,7 +1143,7 @@ public sealed partial class MainWindow : Window
             // is not a plan: if it is gone and we are allowed to start it, start it.
             if (_scene.AutoStartOpenRgb && !OpenRgbLauncher.IsRunning())
             {
-                Say("OpenRGB не отвечает, запускаю заново.");
+                Say("OpenRGB не отвечает, идёт перезапуск.", 6000);
                 EnsureServer();
             }
             return;
@@ -1194,11 +1201,11 @@ public sealed partial class MainWindow : Window
     /// <summary>
     /// Shows or hides the canvas, and gives the window back the width it had.
     ///
-    /// The width has to be handed over twice. While the canvas is hidden the window sizes
-    /// itself to its content, so the Width property still holds the number from before and
-    /// assigning that same number changes nothing at all. Going through ActualWidth first
-    /// makes the second assignment a real change - a trick worth remembering, since without
-    /// it the window simply stays narrow and looks broken.
+    /// Without the canvas the width is fixed and the window is not allowed to follow its own
+    /// content: the bottom bar spans all three columns, so anything too wide for them grows
+    /// the first column, which is auto-sized - one long status line about a lost connection
+    /// was enough to widen the whole window. A width of its own also leaves the height
+    /// alone, which sizing to content did not.
     /// </summary>
     void ApplyCanvasVisibility()
     {
@@ -1209,19 +1216,13 @@ public sealed partial class MainWindow : Window
         _fitButton.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
         _screenToggle.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
 
-        // The status asks for as much width as its longest line needs, so without a ceiling
-        // it would decide how wide the window sizes itself to.
-        _status.MaxWidth = show ? double.PositiveInfinity : 380;
-
         if (show)
         {
             _canvasHost.Visibility = Visibility.Visible;
             _canvasColumn.Width = new GridLength(1, GridUnitType.Star);
 
-            SizeToContent = SizeToContent.Manual;
+            MaxWidth = double.PositiveInfinity;
             MinWidth = WideMinWidth;
-
-            Width = ActualWidth;
             Width = Math.Max(WideMinWidth, _wideWidth);
             return;
         }
@@ -1229,11 +1230,31 @@ public sealed partial class MainWindow : Window
         if (IsLoaded && WindowState == WindowState.Normal && ActualWidth >= WideMinWidth)
             _wideWidth = ActualWidth;
 
+        double narrow = NarrowWidth();
+
         _canvasHost.Visibility = Visibility.Collapsed;
         _canvasColumn.Width = new GridLength(0);
 
         MinWidth = 0;
-        SizeToContent = SizeToContent.Width;
+        Width = narrow;
+        MinWidth = MaxWidth = narrow;
+    }
+
+    /// <summary>
+    /// What is left of the window once the canvas is gone: the sections, the page, and the
+    /// frame around them. Added up rather than asked of the layout, because the point is to
+    /// have a width that does not depend on what is written in the window.
+    /// </summary>
+    double NarrowWidth()
+    {
+        if (_rail.ActualWidth <= 0) UpdateLayout();
+
+        double frame = Content is FrameworkElement root && root.ActualWidth > 0
+            ? ActualWidth - root.ActualWidth
+            : 16;
+
+        // столбец разделов со своими полями, страница и её правое поле
+        return _rail.ActualWidth + 12 + PageWidth + 12 + frame;
     }
 
     /// <summary>Starts or stops showing the screen on the canvas, per the setting.</summary>
@@ -1285,17 +1306,38 @@ public sealed partial class MainWindow : Window
         _view.InvalidateVisual();
     }
 
-    void Say(string text)
+    /// <summary>
+    /// Puts a line in the status bar, and optionally keeps it there for a while.
+    ///
+    /// A hold is needed because the timer has something to say twice a second, and a dead
+    /// server makes that "связь потеряна". The line about the server being restarted was
+    /// replaced half a second later by the next tick, so the restart looked like nothing at
+    /// all happened - which is how it was reported.
+    /// </summary>
+    void Say(string text, int holdMs = 0)
     {
         _status.Text = text;
         _status.ToolTip = text;
+        _holdUntil = holdMs > 0 ? Environment.TickCount64 + holdMs : 0;
     }
+
+    /// <summary>
+    /// What the timer has to say, which waits its turn while a held message is still up.
+    /// Anything the user does speaks over it, since that is an answer to a button press.
+    /// </summary>
+    void SayFromTick(string text, int holdMs = 0)
+    {
+        if (Environment.TickCount64 < _holdUntil) return;
+        Say(text, holdMs);
+    }
+
+    long _holdUntil;
 
     // ---- запуск -----------------------------------------------------------
 
     void ConnectHub()
     {
-        if (_recovering) { Say("Идёт восстановление связи."); return; }
+        if (_recovering) { Say("Идёт восстановление связи.", 6000); return; }
 
         EnsureServer();
         _hub.Connect(force: true);
@@ -1314,7 +1356,11 @@ public sealed partial class MainWindow : Window
         if (!_scene.AutoStartOpenRgb || OpenRgbLauncher.IsRunning()) return;
 
         string path = string.IsNullOrWhiteSpace(_scene.OpenRgbPath) ? "" : _scene.OpenRgbPath;
-        Say(OpenRgbLauncher.Launch(path.Length == 0 ? null : path, _scene.OpenRgbAsAdmin));
+
+        // Gives way to a held message: started from the tick this is the second half of
+        // "OpenRGB не отвечает, идёт перезапуск", and the path it reports would push that
+        // line out half a second after it appeared.
+        SayFromTick(OpenRgbLauncher.Launch(path.Length == 0 ? null : path, _scene.OpenRgbAsAdmin));
         _serverStartedTicks = Environment.TickCount64;
     }
 
@@ -1376,7 +1422,7 @@ public sealed partial class MainWindow : Window
     {
         _recovering = true;
         _painter.Pause("перезапуск OpenRGB");
-        Say("Перезапуск OpenRGB.");
+        Say("Перезапуск OpenRGB.", 6000);
 
         System.Threading.Tasks.Task.Run(() =>
         {
