@@ -165,6 +165,15 @@ public sealed class SceneView : FrameworkElement
 
     protected override void OnRender(DrawingContext dc)
     {
+        // Same shape as the settings block next to it, corner and outline both. Half a pixel
+        // in from the edge, or a one-pixel line straddling the boundary comes out as two
+        // half-lit rows.
+        double corner = Application.Current?.TryFindResource("CardCorner") is CornerRadius c ? c.TopLeft : 8;
+        var outline = new RectangleGeometry(
+            new Rect(0.5, 0.5, Math.Max(0, ActualWidth - 1), Math.Max(0, ActualHeight - 1)), corner, corner);
+
+        dc.PushClip(outline);
+
         dc.DrawRectangle(Themed("Panel"), null,
                          new Rect(0, 0, ActualWidth, ActualHeight));
 
@@ -179,6 +188,10 @@ public sealed class SceneView : FrameworkElement
         if (Selected != null && !TestMode) DrawHandles(dc, Selected);
         if (TestMode) DrawTestPatch(dc);
         if (ShowSampleArea) DrawSampleArea(dc);
+
+        dc.Pop();
+
+        dc.DrawGeometry(null, new Pen(Themed("PanelStroke"), 1), outline);
     }
 
     /// <summary>

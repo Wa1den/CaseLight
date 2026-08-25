@@ -19,11 +19,13 @@
 
         <FontFamily x:Key="Icons">Segoe Fluent Icons,Segoe MDL2 Assets</FontFamily>
 
+        <CornerRadius x:Key="CardCorner">8</CornerRadius>
+
         <Style x:Key="Card" TargetType="Border">
             <Setter Property="Background" Value="{StaticResource Panel}" />
             <Setter Property="BorderBrush" Value="{StaticResource PanelStroke}" />
             <Setter Property="BorderThickness" Value="1" />
-            <Setter Property="CornerRadius" Value="8" />
+            <Setter Property="CornerRadius" Value="{StaticResource CardCorner}" />
             <Setter Property="Padding" Value="16" />
         </Style>
     </Application.Resources>
