@@ -348,7 +348,13 @@ public sealed partial class MainWindow : Window
             FontSize = Ui.TextSize,
             VerticalAlignment = VerticalAlignment.Center,
             Margin = new Thickness(12, 0, 12, 0),
-            TextWrapping = TextWrapping.Wrap
+
+            // One line always: a message with a file path in it would otherwise wrap to
+            // three and lift the whole bottom bar, and the bar moving about under the
+            // buttons is worse than a tail behind an ellipsis. The full text is in the
+            // tooltip, so nothing said here is out of reach.
+            TextWrapping = TextWrapping.NoWrap,
+            TextTrimming = TextTrimming.CharacterEllipsis
         };
         bottom.Children.Add(_status);
 
@@ -1203,9 +1209,8 @@ public sealed partial class MainWindow : Window
         _fitButton.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
         _screenToggle.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
 
-        // A wrapping text block asked for its size without a width to fit into answers with
-        // the whole line unwrapped, so without a ceiling the longest status would decide how
-        // wide the window sizes itself to.
+        // The status asks for as much width as its longest line needs, so without a ceiling
+        // it would decide how wide the window sizes itself to.
         _status.MaxWidth = show ? double.PositiveInfinity : 380;
 
         if (show)
@@ -1280,7 +1285,11 @@ public sealed partial class MainWindow : Window
         _view.InvalidateVisual();
     }
 
-    void Say(string text) => _status.Text = text;
+    void Say(string text)
+    {
+        _status.Text = text;
+        _status.ToolTip = text;
+    }
 
     // ---- запуск -----------------------------------------------------------
 
