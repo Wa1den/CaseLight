@@ -76,7 +76,7 @@ public static class Ui
             return caption;
         }
 
-        var row = WithHelp(caption, help);
+        var row = WithHelpIcon(caption, help);
         row.Margin = new Thickness(0, 16, 0, 6);
         return row;
     }
@@ -107,7 +107,7 @@ public static class Ui
     /// made a page of eight settings mostly prose. On the glyph they are one hover away and
     /// take no room until asked for.
     /// </summary>
-    public static TextBlock Help(string text)
+    public static TextBlock HelpIcon(string text)
     {
         var icon = new TextBlock
         {
@@ -147,11 +147,11 @@ public static class Ui
             VerticalAlignment = VerticalAlignment.Center
         };
 
-        return help == null ? caption : WithHelp(caption, help);
+        return help == null ? caption : WithHelpIcon(caption, help);
     }
 
     /// <summary>A caption, optionally with its explanation glyph, above the editor.</summary>
-    public static UIElement Labelled(string label, UIElement editor, string? help = null)
+    public static UIElement Labeled(string label, UIElement editor, string? help = null)
     {
         var panel = new StackPanel { Margin = new Thickness(0, 4, 0, 4) };
         panel.Children.Add(Caption(label, help));
@@ -159,11 +159,11 @@ public static class Ui
         return panel;
     }
 
-    static StackPanel WithHelp(UIElement element, string help)
+    static StackPanel WithHelpIcon(UIElement element, string help)
     {
         var row = new StackPanel { Orientation = Orientation.Horizontal };
         row.Children.Add(element);
-        row.Children.Add(Help(help));
+        row.Children.Add(HelpIcon(help));
         return row;
     }
 
@@ -171,11 +171,11 @@ public static class Ui
     {
         var box = new TextBox { Text = value, Margin = new Thickness(0, 2, 0, 0) };
         box.TextChanged += (_, _) => set(box.Text);
-        return Labelled(label, box, help);
+        return Labeled(label, box, help);
     }
 
     /// <summary>Accepts both a comma and a dot, because both get typed.</summary>
-    public static UIElement Num(string label, double value, Action<double> set, string? help = null)
+    public static UIElement NumBox(string label, double value, Action<double> set, string? help = null)
     {
         var box = new TextBox
         {
@@ -188,14 +188,14 @@ public static class Ui
                                 CultureInfo.InvariantCulture, out double v))
                 set(v);
         };
-        return Labelled(label, box, help);
+        return Labeled(label, box, help);
     }
 
-    public static UIElement Int(string label, int value, Action<int> set, string? help = null)
+    public static UIElement IntBox(string label, int value, Action<int> set, string? help = null)
     {
         var box = new TextBox { Text = value.ToString(), Margin = new Thickness(0, 2, 0, 0) };
         box.TextChanged += (_, _) => { if (int.TryParse(box.Text, out int v)) set(v); };
-        return Labelled(label, box, help);
+        return Labeled(label, box, help);
     }
 
     /// <summary>
@@ -227,7 +227,7 @@ public static class Ui
         box.Checked += (_, _) => set(true);
         box.Unchecked += (_, _) => set(false);
 
-        return help == null ? box : WithHelp(box, help);
+        return help == null ? box : WithHelpIcon(box, help);
     }
 
     /// <summary>A slider that shows its own value - otherwise it is a guess with a handle.</summary>
@@ -235,7 +235,7 @@ public static class Ui
     /// Turns the number into what it means, when the number alone does not say it. A ratio
     /// of 0.33 is a frame three times wider than it is tall, and nobody reads it that way.
     /// </param>
-    public static UIElement Slide(string label, double value, double min, double max,
+    public static UIElement Slider(string label, double value, double min, double max,
                                   double step, Action<double> set, string suffix = "",
                                   string? help = null, Func<double, string>? format = null)
     {
@@ -263,7 +263,7 @@ public static class Ui
         slider.ValueChanged += (_, _) => { Show(); set(slider.Value); };
 
         var panel = new StackPanel { Margin = new Thickness(0, 4, 0, 4) };
-        panel.Children.Add(help == null ? caption : WithHelp(caption, help));
+        panel.Children.Add(help == null ? caption : WithHelpIcon(caption, help));
         panel.Children.Add(slider);
         return panel;
     }

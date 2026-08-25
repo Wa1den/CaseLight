@@ -142,7 +142,7 @@ public sealed partial class MainWindow
 
         _fixturePanel.Children.Add(Ui.Text("Название", f.Name, v => { f.Name = v; SyncFixtureList(); Touch(); }));
         _fixturePanel.Children.Add(Ui.Check("Участвует в раскраске", f.Enabled, v => { f.Enabled = v; SyncFixtureList(); Touch(); }));
-        _fixturePanel.Children.Add(Ui.Int("Обновлять раз в N кадров", f.UpdateEvery, v => { f.UpdateEvery = Math.Max(1, v); Touch(); },
+        _fixturePanel.Children.Add(Ui.IntBox("Обновлять раз в N кадров", f.UpdateEvery, v => { f.UpdateEvery = Math.Max(1, v); Touch(); },
             "1 — каждый кадр. Оперативной памяти требуется больше: она на шине SMBus, запись туда медленная и на полной частоте задерживает остальные устройства. Обычно достаточно 10–15."));
 
         _fixturePanel.Children.Add(Ui.Row(Ui.Btn("Найти в корпусе", HighlightSelected)));
@@ -167,7 +167,7 @@ public sealed partial class MainWindow
             BuildFixturePanel();
             Touch();
         };
-        _fixturePanel.Children.Add(Ui.Labelled("Контроллер", deviceBox));
+        _fixturePanel.Children.Add(Ui.Labeled("Контроллер", deviceBox));
 
         var info = _hub.Find(f.Binding);
         if (info != null)
@@ -187,7 +187,7 @@ public sealed partial class MainWindow
                 BuildFixturePanel();
                 Touch();
             };
-            _fixturePanel.Children.Add(Ui.Labelled("Зона (разъём)", zoneBox));
+            _fixturePanel.Children.Add(Ui.Labeled("Зона (разъём)", zoneBox));
         }
         else
         {
@@ -195,33 +195,33 @@ public sealed partial class MainWindow
                                                "либо сервер ещё не запущен. Фигура при этом не участвует в раскраске."));
         }
 
-        _fixturePanel.Children.Add(Ui.Int("Первый диод зоны", f.Binding.FirstLed, v => { f.Binding.FirstLed = Math.Max(0, v); Touch(); }));
-        _fixturePanel.Children.Add(Ui.Int("Сколько диодов", f.Binding.LedCount, v => { f.Binding.LedCount = Math.Max(0, v); Touch(); },
+        _fixturePanel.Children.Add(Ui.IntBox("Первый диод зоны", f.Binding.FirstLed, v => { f.Binding.FirstLed = Math.Max(0, v); Touch(); }));
+        _fixturePanel.Children.Add(Ui.IntBox("Сколько диодов", f.Binding.LedCount, v => { f.Binding.LedCount = Math.Max(0, v); Touch(); },
             "Если на одном разъёме несколько устройств, их разводят по разным фигурам, поделив диапазон диодов."));
 
         // ---- место
         _fixturePanel.Children.Add(Ui.Header("Место в корпусе, мм"));
-        _fixturePanel.Children.Add(Ui.Num("Центр по горизонтали", f.CenterX, v => { f.CenterX = v; Touch(); }));
-        _fixturePanel.Children.Add(Ui.Num("Центр по вертикали", f.CenterY, v => { f.CenterY = v; Touch(); }));
+        _fixturePanel.Children.Add(Ui.NumBox("Центр по горизонтали", f.CenterX, v => { f.CenterX = v; Touch(); }));
+        _fixturePanel.Children.Add(Ui.NumBox("Центр по вертикали", f.CenterY, v => { f.CenterY = v; Touch(); }));
         // Only the dimensions the arrangement actually has. Across a strip, or across a
         // ring standing edge-on, the fixture is as wide as the sampling area covers, and a
         // field for it would be a number that changes nothing.
         if (f.Arrangement == Arrangement.Strip)
         {
-            _fixturePanel.Children.Add(Ui.Num("Длина", f.Width, v => { f.Width = Math.Max(5, v); Touch(); },
+            _fixturePanel.Children.Add(Ui.NumBox("Длина", f.Width, v => { f.Width = Math.Max(5, v); Touch(); },
                 "Поперёк полосы размер задаёт область выборки."));
         }
         else if (f.Arrangement == Arrangement.Closed && f.EdgeOn)
         {
-            _fixturePanel.Children.Add(Ui.Num("Длина", f.Height, v => { f.Height = Math.Max(5, v); Touch(); },
+            _fixturePanel.Children.Add(Ui.NumBox("Длина", f.Height, v => { f.Height = Math.Max(5, v); Touch(); },
                 "Кольцо видно с торца, поперёк размер задаёт область выборки."));
         }
         else if (f.Arrangement != Arrangement.Point)
         {
-            _fixturePanel.Children.Add(Ui.Num("Ширина", f.Width, v => { f.Width = Math.Max(5, v); Touch(); }));
-            _fixturePanel.Children.Add(Ui.Num("Высота", f.Height, v => { f.Height = Math.Max(5, v); Touch(); }));
+            _fixturePanel.Children.Add(Ui.NumBox("Ширина", f.Width, v => { f.Width = Math.Max(5, v); Touch(); }));
+            _fixturePanel.Children.Add(Ui.NumBox("Высота", f.Height, v => { f.Height = Math.Max(5, v); Touch(); }));
         }
-        _fixturePanel.Children.Add(Ui.Num("Поворот, градусов", f.AngleDeg, v => { f.AngleDeg = v; Touch(); }));
+        _fixturePanel.Children.Add(Ui.NumBox("Поворот, градусов", f.AngleDeg, v => { f.AngleDeg = v; Touch(); }));
 
         // ---- раскладка
         _fixturePanel.Children.Add(Ui.Header("Как идут диоды"));
@@ -247,14 +247,14 @@ public sealed partial class MainWindow
             BuildFixturePanel();
             Touch();
         };
-        _fixturePanel.Children.Add(Ui.Labelled("Форма", kindBox));
+        _fixturePanel.Children.Add(Ui.Labeled("Форма", kindBox));
 
         if (f.Arrangement == Arrangement.Closed)
         {
             _fixturePanel.Children.Add(Ui.Check("Контур круглый", f.RoundContour, v => { f.RoundContour = v; BuildFixturePanel(); Touch(); }));
 
             if (!f.RoundContour)
-                _fixturePanel.Children.Add(Ui.Slide("Пропорции рамки", AspectToScale(f.ContourAspect), -10, 10, 0.1,
+                _fixturePanel.Children.Add(Ui.Slider("Пропорции рамки", AspectToScale(f.ContourAspect), -10, 10, 0.1,
                     v => { f.ContourAspect = ScaleToAspect(v); Touch(); }, "",
                     "Физические пропорции устройства, если оно не квадратное: у рамки тройного вентилятора это примерно втрое выше.",
                     format: DescribeAspect));
@@ -349,16 +349,20 @@ public sealed partial class MainWindow
     void BuildColorsSection() => AddSection("Цвета", "\uE790", panel =>
     {
         panel.Children.Add(Ui.Header("Коррекция"));
-        panel.Children.Add(Ui.Slide("Яркость", _scene.Brightness, 0, 1, 0.01, v => { _scene.Brightness = v; Touch(); }));
-        panel.Children.Add(Ui.Slide("Насыщенность", _scene.Saturation, 0, 3, 0.05, v => { _scene.Saturation = v; Touch(); }));
-        panel.Children.Add(Ui.Slide("Гамма", _scene.Gamma, 0.5, 4, 0.05, v => { _scene.Gamma = v; Touch(); }));
-        panel.Children.Add(Ui.Slide("Температура", _scene.TemperatureK, 1500, 15000, 100, v => { _scene.TemperatureK = (int)v; Touch(); }, " K"));
-        panel.Children.Add(Ui.Slide("Порог темноты", _scene.MinLuma, 0, 0.1, 0.0001, v => { _scene.MinLuma = v; Touch(); }, "",
+        panel.Children.Add(Ui.Slider("Яркость", _scene.Brightness, 0, 1, 0.01, v => { _scene.Brightness = v; Touch(); }));
+        panel.Children.Add(Ui.Slider("Насыщенность", _scene.Saturation, 0, 3, 0.05, v => { _scene.Saturation = v; Touch(); }));
+        panel.Children.Add(Ui.Slider("Гамма", _scene.Gamma, 0.5, 4, 0.05, v => { _scene.Gamma = v; Touch(); }));
+        panel.Children.Add(Ui.Slider("Температура", _scene.TemperatureK, 1500, 15000, 100, v => { _scene.TemperatureK = (int)v; Touch(); }, " K"));
+        // Кубическая шкала: рабочие значения лежат около 0,003, и на линейной шкале весь ход
+        // уходит на ту часть диапазона, где лента просто гаснет.
+        panel.Children.Add(Ui.Slider("Порог темноты", Math.Pow(_scene.MinLuma / 0.3, 1.0 / 3.0), 0, 1, 0.005,
+            v => { _scene.MinLuma = Math.Pow(v, 3) * 0.3; Touch(); }, "",
             "Ниже этой яркости диод гаснет полностью. Нужен, когда на чёрном экране есть мелкие светлые детали: " +
             "они поднимают среднюю яркость участка, и подсветка остаётся тускло гореть.",
-            format: v => v <= 0 ? "выключен" : v.ToString("0.####", CultureInfo.InvariantCulture)));
+            format: v => v <= 0 ? "выключен"
+                                : (Math.Pow(v, 3) * 0.3).ToString("0.0000", CultureInfo.InvariantCulture)));
 
-        panel.Children.Add(Ui.Slide("Обесцвечивать тёмное", _scene.ShadowNeutral, 0, 0.4, 0.01,
+        panel.Children.Add(Ui.Slider("Обесцвечивать тёмное", _scene.ShadowNeutral, 0, 0.4, 0.01,
             v => { _scene.ShadowNeutral = v; Touch(); }, "",
             "Чем темнее участок, тем сильнее его цвет сводится к серому. Исключает случаи, когда слишком тёмный " +
             "объект светит другим цветом: на малой яркости каналы диода светят неодинаково, и разница между ними " +
@@ -367,14 +371,14 @@ public sealed partial class MainWindow
 
         panel.Children.Add(Ui.Header("Баланс по каналам",
             "Диоды разных устройств передают цвет по-разному. Здесь задаётся общая поправка."));
-        panel.Children.Add(Ui.Slide("Красный", _scene.GainR, 0, 2, 0.01, v => { _scene.GainR = v; Touch(); }));
-        panel.Children.Add(Ui.Slide("Зелёный", _scene.GainG, 0, 2, 0.01, v => { _scene.GainG = v; Touch(); }));
-        panel.Children.Add(Ui.Slide("Синий", _scene.GainB, 0, 2, 0.01, v => { _scene.GainB = v; Touch(); }));
+        panel.Children.Add(Ui.Slider("Красный", _scene.GainR, 0, 2, 0.01, v => { _scene.GainR = v; Touch(); }));
+        panel.Children.Add(Ui.Slider("Зелёный", _scene.GainG, 0, 2, 0.01, v => { _scene.GainG = v; Touch(); }));
+        panel.Children.Add(Ui.Slider("Синий", _scene.GainB, 0, 2, 0.01, v => { _scene.GainB = v; Touch(); }));
 
         panel.Children.Add(Ui.Header("Плавность",
             "Больше значение — быстрее переход. Привычнее выглядит быстрое нарастание и плавный спад."));
-        panel.Children.Add(Ui.Slide("Разгорается", _scene.SmoothingRise, 0.01, 1, 0.01, v => { _scene.SmoothingRise = v; Touch(); }));
-        panel.Children.Add(Ui.Slide("Гаснет", _scene.SmoothingFall, 0.01, 1, 0.01, v => { _scene.SmoothingFall = v; Touch(); }));
+        panel.Children.Add(Ui.Slider("Разгорается", _scene.SmoothingRise, 0.01, 1, 0.01, v => { _scene.SmoothingRise = v; Touch(); }));
+        panel.Children.Add(Ui.Slider("Гаснет", _scene.SmoothingFall, 0.01, 1, 0.01, v => { _scene.SmoothingFall = v; Touch(); }));
     });
 
     /// <summary>
@@ -403,9 +407,9 @@ public sealed partial class MainWindow
             PushTestPatch();
             Touch();
         };
-        panel.Children.Add(Ui.Labelled("Форма пятна", shapeBox));
+        panel.Children.Add(Ui.Labeled("Форма пятна", shapeBox));
 
-        panel.Children.Add(Ui.Slide("Размер пятна", _scene.TestSizeMm, 20, 1200, 10, v =>
+        panel.Children.Add(Ui.Slider("Размер пятна", _scene.TestSizeMm, 20, 1200, 10, v =>
         {
             _scene.TestSizeMm = v;
             _view.TestSizeMm = v;

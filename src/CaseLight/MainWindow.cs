@@ -605,7 +605,7 @@ public sealed partial class MainWindow : Window
             Touch();
         };
 
-        panel.Children.Add(Ui.Labelled("Метод", box,
+        panel.Children.Add(Ui.Labeled("Метод", box,
             "От Rimlight кадры приходят через разделяемую память, свой захват при этом не работает. " +
             "«Автоматически» держит DDA и WGC вместе и переходит на GDI, когда те перестают выдавать кадры."));
 
@@ -636,15 +636,15 @@ public sealed partial class MainWindow : Window
             Touch();
         };
 
-        panel.Children.Add(Ui.Labelled("Экран", monitorBox,
+        panel.Children.Add(Ui.Labeled("Экран", monitorBox,
             "Монитор для захвата. При режиме получения от Rimlight выбор определяется им."));
 
         panel.Children.Add(Ui.Note($"Прямоугольник монитора: {_scene.Monitor.Width:F0} × {_scene.Monitor.Height:F0} мм"));
 
-        panel.Children.Add(Ui.Slide("Кадров в секунду", _scene.MaxFps, 1, 120, 1, v => { _scene.MaxFps = (int)v; Touch(); }, "",
+        panel.Children.Add(Ui.Slider("Кадров в секунду", _scene.MaxFps, 1, 120, 1, v => { _scene.MaxFps = (int)v; Touch(); }, "",
             "Верхний предел для быстрых устройств. Медленным задаётся свой делитель в параметрах фигуры."));
 
-        panel.Children.Add(Ui.Slide("Область выборки", _scene.SampleRadiusMm, 1, 100, 1,
+        panel.Children.Add(Ui.Slider("Область выборки", _scene.SampleRadiusMm, 1, 100, 1,
             v => { _scene.SampleRadiusMm = Math.Max(1, v); ShowSampleArea(); Touch(); }, " мм",
             "Размер участка экрана, усредняемого для одного диода. При малом значении цвет меняется от любого движения в кадре, при большом усредняется до однородного оттенка."));
 
@@ -737,13 +737,13 @@ public sealed partial class MainWindow : Window
             _scene.WakeRecovery = WakeModes[wakeBox.SelectedIndex];
             Touch();
         };
-        panel.Children.Add(Ui.Labelled("Что делать", wakeBox,
+        panel.Children.Add(Ui.Labeled("Что делать", wakeBox,
             "Во сне контроллеры переподключаются к USB, а работавший сервер продолжает запись в прежние дескрипторы и возвращает признак успеха: " +
             "подсветка при этом остаётся в состоянии, установленном при подаче питания. Перезапуск возвращает управление."));
 
         panel.Children.Add(Ui.Row(Ui.Btn("Перезапустить OpenRGB сейчас", RestartServerNow)));
 
-        panel.Children.Add(Ui.Slide("Пауза после пробуждения", _scene.ResumeDelayMs / 1000.0, 0, 30, 1,
+        panel.Children.Add(Ui.Slider("Пауза после пробуждения", _scene.ResumeDelayMs / 1000.0, 0, 30, 1,
             v => { _scene.ResumeDelayMs = (int)(v * 1000); Touch(); }, " с",
             "Сколько не трогать подсветку после выхода из сна. При перезапуске пауза откладывает сам перезапуск: контроллеры в это время " +
             "переподключаются к USB, а поиск устройств по неустоявшейся шине даёт неполный список. В режиме «Ничего не делать» пауза " +
@@ -1229,7 +1229,8 @@ public sealed partial class MainWindow : Window
 
             MaxWidth = double.PositiveInfinity;
             MinWidth = WideMinWidth;
-            Width = Math.Max(WideMinWidth, _wideWidth);
+            if (IsLoaded && WindowState == WindowState.Normal)
+                Width = Math.Max(WideMinWidth, _wideWidth);
             return;
         }
 
@@ -1247,22 +1248,28 @@ public sealed partial class MainWindow : Window
     }
 
     /// <summary>
-    /// What is left of the window once the canvas is gone: the sections, the page, and the
-    /// frame around them. Added up rather than asked of the layout, because the point is to
-    /// have a width that does not depend on what is written in the window.
+    /// What is left of the window once the canvas is gone: the section rail, the settings
+    /// page and the window frame. Added up rather than asked of the layout, because the
+    /// point is a width that does not depend on what is written in the window.
+    ///
+    /// The rail is measured, not read: a rebuild of the sections changes its captions, and
+    /// before the window is shown nothing has been laid out at all. DesiredSize covers its
+    /// margins either way. The page's own right margin is left out - there is no canvas
+    /// beside it to keep clear of, and the window frame leaves a gap there anyway.
     /// </summary>
     double NarrowWidth()
     {
-        if (_rail.ActualWidth <= 0) UpdateLayout();
+        if (IsLoaded) UpdateLayout();
+        else if (_rail.DesiredSize.Width <= 0)
+            _rail.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
 
+        // Пока окно не показано, рамку измерить нечем, поэтому стартовое значение
+        // приблизительное; в Loaded расчёт повторяется и заменяет его точным.
         double frame = Content is FrameworkElement root && root.ActualWidth > 0
             ? ActualWidth - root.ActualWidth
             : 16;
 
-        // Столбец разделов со своими полями и страница. Правое поле страницы в счёт не
-        // идёт: рядом больше нет холста, от которого нужно отступать, а рамка окна свой
-        // просвет справа и так оставляет.
-        return _rail.ActualWidth + 12 + PageWidth + frame;
+        return _rail.DesiredSize.Width + PageWidth + frame;
     }
 
     /// <summary>Starts or stops showing the screen on the canvas, per the setting.</summary>
