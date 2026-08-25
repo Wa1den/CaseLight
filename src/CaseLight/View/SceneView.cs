@@ -6,6 +6,8 @@ using System.Windows.Input;
 using System.Windows.Media;
 using CaseLight.Model;
 
+using CaseLight.Core.Text;
+
 namespace CaseLight.View;
 
 /// <summary>
@@ -217,7 +219,7 @@ public sealed class SceneView : FrameworkElement
         else
             dc.DrawRectangle(fill, pen, new Rect(centre.X - halfPx, centre.Y - halfPx, halfPx * 2, halfPx * 2));
 
-        Label(dc, "тестовое пятно, перемещается мышью", new Point(centre.X - halfPx, centre.Y - halfPx - 18),
+        Label(dc, Loc.P("тестовое пятно, перемещается мышью", "test patch, moved with the mouse"), new Point(centre.X - halfPx, centre.Y - halfPx - 18),
               ThemedColor("Fg"), 12);
     }
 
@@ -256,7 +258,8 @@ public sealed class SceneView : FrameworkElement
         var pen = new Pen(new SolidColorBrush(colour), 2);
 
         dc.DrawEllipse(fill, pen, centre, r, r);
-        Label(dc, $"область выборки {SampleAreaMm:F0} мм", new Point(centre.X + r + 8, centre.Y - 8), colour, 13);
+        Label(dc, string.Format(Loc.P("область выборки {0} мм", "sampling area {0} mm"), SampleAreaMm.ToString("F0")),
+              new Point(centre.X + r + 8, centre.Y - 8), colour, 13);
     }
 
     void DrawScreen(DrawingContext dc)

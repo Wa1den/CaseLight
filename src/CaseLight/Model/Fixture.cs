@@ -1,6 +1,8 @@
 using System;
 using System.Text.Json.Serialization;
 
+using CaseLight.Core.Text;
+
 namespace CaseLight.Model;
 
 /// <summary>How the LEDs of a fixture are arranged inside its rectangle.</summary>
@@ -55,7 +57,7 @@ public sealed class Binding
 public sealed class Fixture
 {
     public string Id { get; set; } = Guid.NewGuid().ToString("N")[..8];
-    public string Name { get; set; } = "Новая фигура";
+    public string Name { get; set; } = Loc.P("Новая фигура", "New fixture");
     public Binding Binding { get; set; } = new();
 
     // ---- место на сцене, в миллиметрах ------------------------------------
