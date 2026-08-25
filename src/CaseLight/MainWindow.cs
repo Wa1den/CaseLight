@@ -323,7 +323,7 @@ public sealed partial class MainWindow : Window
         grid.Children.Add(right);
 
         // ---- низ: действия и статус
-        var bottom = new DockPanel { Margin = new Thickness(12, 0, 12, 12) };
+        var bottom = new DockPanel { Margin = new Thickness(12, 0, 12, 8) };
 
         var actions = new StackPanel { Orientation = Orientation.Horizontal };
         actions.Children.Add(Ui.Btn("Старт", StartPainting));
@@ -333,6 +333,12 @@ public sealed partial class MainWindow : Window
         actions.Children.Add(_fitButton);
         DockPanel.SetDock(actions, Dock.Left);
         bottom.Children.Add(actions);
+
+        // The bar is exactly as tall as its buttons, whatever else stands in it. The screen
+        // checkbox measures taller than they do, so with the canvas shown it set the height
+        // of the whole bar and the buttons rode along its top edge - and hiding the canvas
+        // took the checkbox away and dropped them by those few pixels.
+        actions.SizeChanged += (_, _) => bottom.Height = actions.ActualHeight;
 
         // Under the canvas rather than in the settings: it is a way of looking at the
         // layout, switched on and off while working on it, not something to set once.
@@ -1253,8 +1259,10 @@ public sealed partial class MainWindow : Window
             ? ActualWidth - root.ActualWidth
             : 16;
 
-        // столбец разделов со своими полями, страница и её правое поле
-        return _rail.ActualWidth + 12 + PageWidth + 12 + frame;
+        // Столбец разделов со своими полями и страница. Правое поле страницы в счёт не
+        // идёт: рядом больше нет холста, от которого нужно отступать, а рамка окна свой
+        // просвет справа и так оставляет.
+        return _rail.ActualWidth + 12 + PageWidth + frame;
     }
 
     /// <summary>Starts or stops showing the screen on the canvas, per the setting.</summary>
