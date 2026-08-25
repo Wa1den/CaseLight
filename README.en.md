@@ -10,6 +10,8 @@ Windows, x64, .NET 9.
 
 ![The CaseLight window: settings on the left, the plan with fixtures around the monitor rectangle on the right](pics/interface.jpg)
 
+![The case beside the monitor: the lighting repeats the colours of the nearest parts of the screen](pics/example.gif)
+
 ## Placement model
 
 The case stands next to the monitor, so the image can be continued past the edge of the
