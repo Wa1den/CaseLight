@@ -113,7 +113,19 @@ public sealed class CasePainter : IDisposable
     /// <summary>Set by the window while the canvas is showing the screen.</summary>
     public volatile bool PreviewWanted;
 
-    public string Status { get; private set; } = Loc.P("остановлено", "stopped");
+    /// <summary>
+    /// The loop rewrites this every tick, so a language change catches up on its own while
+    /// the painting runs. Stopped, there is nothing to rewrite it, so the idle line is
+    /// composed on read instead of being stored.
+    /// </summary>
+    public string Status
+    {
+        get => _idle ? Loc.P("остановлено", "stopped") : _status;
+        private set { _status = value; _idle = false; }
+    }
+
+    string _status = "";
+    volatile bool _idle = true;
     public bool IsRunning => _running;
     public bool IsPaused => _paused;
     public string PauseReason => _pauseReason;
@@ -224,7 +236,7 @@ public sealed class CasePainter : IDisposable
 
         StopCapture();
         _hub.Blackout();
-        Status = Loc.P("остановлено", "stopped");
+        _idle = true;
     }
 
     /// <summary>Darkens the case and stops writing - for lock, sleep and display off.</summary>
