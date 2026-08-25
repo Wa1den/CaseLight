@@ -128,6 +128,32 @@ The layout, the settings and the log are kept in `%AppData%\CaseLight\`. The ent
 of the program is stored in `scene.json`, and moving it to another machine is a matter of
 exporting and importing that file.
 
+## Localisation
+
+Two languages are built into the program, Russian and English. On the first run they are
+written to `%AppData%\CaseLight\lang\` as `ru.json` and `en.json`, and from then on those
+files are what gets read: an edit in a file shows up after a restart. When the program is
+updated both built-in files are rewritten so that an old file cannot hide new wording; the
+`_version` field is what marks that. Added languages are left alone.
+
+A translation of your own is one more file in the same folder:
+
+1. Copy `en.json` under a name that is the language code, `de.json` for instance: the file
+   name is the code. Templates of both built-in languages are in the [lang](lang) folder of
+   the repository.
+2. Replace the values with the translated ones and leave the keys on the left as they are.
+   `{0}` inside a string is a substitution (screen size, LED count, controller name) and has
+   to be kept. The `_name` field holds the name of the language as it should appear in the
+   list, `Deutsch` for instance. The `_version` field can be deleted: it only concerns the
+   built-in files.
+3. Start the program — the language appears in the list in the General section.
+
+The file is only checked for its basic shape: it has to read as JSON of «string: string»
+and to carry at least a few known keys, otherwise it is not taken for a translation and is
+skipped with a line in the log. Translating everything at once is not required: the keys
+that are missing come from English. For an added language part of the service text stays in
+English as well — log messages and status lines are set in code rather than in JSON.
+
 ## Tools
 
 The `tools` directory is not part of the solution and is built separately. These utilities

@@ -13,6 +13,8 @@ using CaseLight.Render;
 using CaseLight.Rgb;
 using CaseLight.View;
 
+using CaseLight.Core.Text;
+
 namespace CaseLight;
 
 /// <summary>
@@ -57,7 +59,14 @@ public sealed partial class MainWindow : Window
     ColumnDefinition _canvasColumn = null!;
     Grid _canvasHost = null!;
     DockPanel _rail = null!;
-    UIElement _fitButton = null!;
+    DockPanel _bottomBar = null!;
+    CheckBox _canvasToggle = null!;
+    Button _startButton = null!;
+    Button _stopButton = null!;
+    Button _applyButton = null!;
+    Button _cancelButton = null!;
+    TextBlock _dirtyText = null!;
+    Button _fitButton = null!;
     UIElement _screenToggle = null!;
 
     /// <summary>Window width with the canvas open, to come back to when it is shown again.</summary>
@@ -131,10 +140,13 @@ public sealed partial class MainWindow : Window
 
     public MainWindow()
     {
-        Title = "CaseLight — подсветка корпуса";
-
         ProbeLog.Configure(Scene.LogPath, _scene.WriteLog);
-        CaseLight.Core.Text.Loc.Configure(System.IO.Path.Combine(Scene.Folder, "lang"));
+
+        // Раньше всего остального: дальше собираются подписи, а они уже переведённые.
+        Loc.Configure(System.IO.Path.Combine(Scene.Folder, "lang"));
+        Loc.Load(_scene.Language);
+
+        Title = Loc.T("app.title");
 
         try { Icon = new System.Windows.Media.Imaging.BitmapImage(new Uri("pack://application:,,,/icon.ico")); }
         catch { /* без иконки окно всё равно работает */ }
@@ -269,14 +281,14 @@ public sealed partial class MainWindow : Window
 
         // The canvas switch lives under the sections rather than in them: it is about the
         // shape of the window, not about any one page.
-        var canvasToggle = Ui.Check("Отображать холст", _scene.ShowCanvas,
+        _canvasToggle = (CheckBox)Ui.Check(Loc.T("nav.canvas"), _scene.ShowCanvas,
             v => { _scene.ShowCanvas = v; ApplyCanvasVisibility(); Touch(); });
 
-        if (canvasToggle is FrameworkElement toggle) toggle.Margin = new Thickness(12, 12, 0, 0);
-        DockPanel.SetDock(canvasToggle, Dock.Bottom);
+        _canvasToggle.Margin = new Thickness(12, 12, 0, 0);
+        DockPanel.SetDock(_canvasToggle, Dock.Bottom);
 
         _rail = new DockPanel { Margin = new Thickness(6, 12, 6, 12) };
-        _rail.Children.Add(canvasToggle);
+        _rail.Children.Add(_canvasToggle);
         _rail.Children.Add(_nav);
 
         Grid.SetColumn(_rail, 0);
@@ -324,12 +336,15 @@ public sealed partial class MainWindow : Window
 
         // ---- низ: действия и статус
         var bottom = new DockPanel { Margin = new Thickness(12, 0, 12, 8) };
+        _bottomBar = bottom;
 
         var actions = new StackPanel { Orientation = Orientation.Horizontal };
-        actions.Children.Add(Ui.Btn("Старт", StartPainting));
-        actions.Children.Add(Ui.Btn("Стоп", StopPainting));
+        _startButton = Ui.Btn(Loc.T("bar.start"), StartPainting);
+        _stopButton = Ui.Btn(Loc.T("bar.stop"), StopPainting);
+        actions.Children.Add(_startButton);
+        actions.Children.Add(_stopButton);
 
-        _fitButton = Ui.Btn("Центрировать холст", () => _view.FitToContent());
+        _fitButton = Ui.Btn(Loc.T("bar.fit"), () => _view.FitToContent());
         actions.Children.Add(_fitButton);
         DockPanel.SetDock(actions, Dock.Left);
         bottom.Children.Add(actions);
@@ -340,15 +355,8 @@ public sealed partial class MainWindow : Window
         // took the checkbox away and dropped them by those few pixels.
         actions.SizeChanged += (_, _) => bottom.Height = actions.ActualHeight;
 
-        // Under the canvas rather than in the settings: it is a way of looking at the
-        // layout, switched on and off while working on it, not something to set once.
-        var screenToggle = Ui.Check("Отображать данные с экрана", _scene.ShowScreen,
-            v => { _scene.ShowScreen = v; ApplyScreenPreview(); Touch(); },
-            "Требует запущенной раскраски.");
-        if (screenToggle is FrameworkElement box) box.Margin = new Thickness(12, 0, 0, 0);
-        DockPanel.SetDock(screenToggle, Dock.Right);
-        bottom.Children.Add(screenToggle);
-        _screenToggle = screenToggle;
+        _screenToggle = BuildScreenToggle();
+        bottom.Children.Add(_screenToggle);
 
         _status = new TextBlock
         {
@@ -378,24 +386,46 @@ public sealed partial class MainWindow : Window
         return root;
     }
 
+    /// <summary>
+    /// The screen switch, built apart from the bar so a language change can put a fresh one
+    /// in its place: its tooltip is inside the element, and there is nothing to reassign.
+    /// </summary>
+    UIElement BuildScreenToggle()
+    {
+        // Under the canvas rather than in the settings: it is a way of looking at the
+        // layout, switched on and off while working on it, not something to set once.
+        var toggle = Ui.Check(Loc.T("bar.screen"), _scene.ShowScreen,
+            v => { _scene.ShowScreen = v; ApplyScreenPreview(); Touch(); },
+            Loc.T("bar.screen.note"));
+
+        if (toggle is FrameworkElement box) box.Margin = new Thickness(12, 0, 0, 0);
+        DockPanel.SetDock(toggle, Dock.Right);
+        return toggle;
+    }
+
     Border BuildDirtyBar()
     {
-        var apply = Ui.Btn("Применить", ApplyChanges, accent: true);
-        var cancel = Ui.Btn("Отмена", CancelChanges);
+        _applyButton = Ui.Btn(Loc.T("bar.apply"), ApplyChanges, accent: true);
+        _cancelButton = Ui.Btn(Loc.T("bar.cancel"), CancelChanges);
+
+        var apply = _applyButton;
+        var cancel = _cancelButton;
+
+        _dirtyText = new TextBlock
+        {
+            Text = Loc.T("bar.dirty"),
+            Foreground = Ui.Warn,
+            FontSize = Ui.TextSize,
+            VerticalAlignment = VerticalAlignment.Center,
+            TextWrapping = TextWrapping.Wrap
+        };
 
         var dock = new DockPanel();
         DockPanel.SetDock(cancel, Dock.Right);
         DockPanel.SetDock(apply, Dock.Right);
         dock.Children.Add(cancel);
         dock.Children.Add(apply);
-        dock.Children.Add(new TextBlock
-        {
-            Text = "Есть несохранённые изменения",
-            Foreground = Ui.Warn,
-            FontSize = Ui.TextSize,
-            VerticalAlignment = VerticalAlignment.Center,
-            TextWrapping = TextWrapping.Wrap
-        });
+        dock.Children.Add(_dirtyText);
 
         var card = Ui.Card(dock);
         card.Padding = new Thickness(12);
@@ -493,27 +523,39 @@ public sealed partial class MainWindow : Window
         ApplyCanvasVisibility();
     }
 
-    void BuildGeneralSection() => AddSection("Основное", "\uE713", panel =>
+    void BuildGeneralSection() => AddSection(Loc.T("tab.main"), "\uE713", panel =>
     {
-        panel.Children.Add(Ui.Header("Окно"));
-        panel.Children.Add(Ui.Check("Сворачивать в трей", _scene.MinimizeToTray, v => { _scene.MinimizeToTray = v; Touch(); },
-            "Крестик прячет окно, программа продолжает работать. Выход - через меню значка в трее."));
-        panel.Children.Add(Ui.Check("Запускать свёрнутым", _scene.StartMinimized, v => { _scene.StartMinimized = v; Touch(); }));
+        var langBox = new ComboBox { Margin = new Thickness(0, 2, 0, 4) };
+        foreach (var code in Loc.Available) langBox.Items.Add(Loc.DisplayName(code));
+        langBox.SelectedIndex = Math.Max(0, Array.IndexOf(Loc.Available, Loc.Language));
+        langBox.SelectionChanged += (_, _) =>
+        {
+            if (_rebuildingUi) return;
 
-        panel.Children.Add(Ui.Header("Запуск"));
-        panel.Children.Add(Ui.Check("Запускать вместе с Windows", Autostart.IsEnabled(), v => Say(Autostart.Set(v)),
-            "Подсветкой управляет OpenRGB, поэтому автозапуск CaseLight имеет смысл только вместе с автозапуском OpenRGB."));
-        panel.Children.Add(Ui.Check("Сразу начинать раскраску", _scene.StartPaintingOnLaunch, v => { _scene.StartPaintingOnLaunch = v; Touch(); }));
+            _scene.Language = Loc.Available[Math.Max(0, langBox.SelectedIndex)];
+            Touch();
+            ApplyLanguage();
+        };
+        panel.Children.Add(Ui.Labeled(Loc.T("main.language"), langBox, Loc.T("main.language.note")));
 
-        panel.Children.Add(Ui.Header("Сервер OpenRGB"));
-        panel.Children.Add(Ui.Check("Запускать OpenRGB, если он не запущен", _scene.AutoStartOpenRgb, v => { _scene.AutoStartOpenRgb = v; Touch(); },
-            "Сервер запускается с ключами --server --startminimized: первый открывает порт 6742, второй убирает окно."));
-        panel.Children.Add(Ui.Check("Запускать от администратора с запросом", _scene.OpenRgbAsAdmin, SetRunAsAdmin,
-            "Права администратора нужны OpenRGB для доступа к шине SMBus, через которую управляется оперативная память. " +
-            "При каждом запуске сервера будет запрос UAC."));
+        panel.Children.Add(Ui.Header(Loc.T("main.window")));
+        panel.Children.Add(Ui.Check(Loc.T("main.tray"), _scene.MinimizeToTray, v => { _scene.MinimizeToTray = v; Touch(); },
+            Loc.T("main.tray.note")));
+        panel.Children.Add(Ui.Check(Loc.T("main.startmin"), _scene.StartMinimized, v => { _scene.StartMinimized = v; Touch(); }));
 
-        panel.Children.Add(Ui.Check("Запускать от администратора автоматически", OpenRgbTask.Exists(), SetLogonTask,
-            "Создаёт задание в планировщике Windows для автоматического запуска OpenRGB от администратора, с однократным подтверждением.",
+        panel.Children.Add(Ui.Header(Loc.T("main.startup")));
+        panel.Children.Add(Ui.Check(Loc.T("main.autostart"), Autostart.IsEnabled(), v => Say(Autostart.Set(v)),
+            Loc.T("main.autostart.note")));
+        panel.Children.Add(Ui.Check(Loc.T("main.autopaint"), _scene.StartPaintingOnLaunch, v => { _scene.StartPaintingOnLaunch = v; Touch(); }));
+
+        panel.Children.Add(Ui.Header(Loc.T("main.server")));
+        panel.Children.Add(Ui.Check(Loc.T("main.serverstart"), _scene.AutoStartOpenRgb, v => { _scene.AutoStartOpenRgb = v; Touch(); },
+            Loc.T("main.serverstart.note")));
+        panel.Children.Add(Ui.Check(Loc.T("main.admin"), _scene.OpenRgbAsAdmin, SetRunAsAdmin,
+            Loc.T("main.admin.note")));
+
+        panel.Children.Add(Ui.Check(Loc.T("main.task"), OpenRgbTask.Exists(), SetLogonTask,
+            Loc.T("main.task.note"),
             enabled: _scene.OpenRgbAsAdmin));
 
         // Shown, not stored: the setting stays empty so the search runs again if OpenRGB
@@ -522,22 +564,22 @@ public sealed partial class MainWindow : Window
             ? OpenRgbLauncher.FindExe() ?? ""
             : _scene.OpenRgbPath;
 
-        panel.Children.Add(Ui.Text("Путь к OpenRGB.exe", knownPath, v => { _scene.OpenRgbPath = v; Touch(); },
-            "Заполняется найденным файлом. Пустое поле - искать заново при каждом запуске: сначала в Program Files и %LocalAppData%\\Programs, затем в записях об удалении в реестре."));
-        panel.Children.Add(Ui.Row(Ui.Btn("Найти", () =>
+        panel.Children.Add(Ui.Text(Loc.T("main.path"), knownPath, v => { _scene.OpenRgbPath = v; Touch(); },
+            Loc.T("main.path.note")));
+        panel.Children.Add(Ui.Row(Ui.Btn(Loc.T("main.find"), () =>
         {
             string? found = OpenRgbLauncher.FindExe();
-            Say(found == null ? "OpenRGB.exe не найден, укажите путь вручную" : "Найден: " + found);
-        }), Ui.Btn("Запустить сейчас", () => Say(OpenRgbLauncher.Launch(
+            Say(found == null ? Loc.P("OpenRGB.exe не найден, укажите путь вручную", "OpenRGB.exe not found, set the path by hand") : Loc.P("Найден: ", "Found: ") + found);
+        }), Ui.Btn(Loc.T("main.launch"), () => Say(OpenRgbLauncher.Launch(
             string.IsNullOrWhiteSpace(_scene.OpenRgbPath) ? null : _scene.OpenRgbPath, _scene.OpenRgbAsAdmin))),
-            Ui.Btn("Переподключиться", ConnectHub)));
+            Ui.Btn(Loc.T("main.reconnect"), ConnectHub)));
 
-        panel.Children.Add(Ui.Header("Настройки",
-            "Один файл со всем: раскладка, размеры монитора, цвета, захват, питание."));
-        panel.Children.Add(Ui.Row(Ui.Btn("Экспорт…", ExportSettings), Ui.Btn("Импорт…", ImportSettings)));
+        panel.Children.Add(Ui.Header(Loc.T("main.settings"),
+            Loc.T("main.settings.note")));
+        panel.Children.Add(Ui.Row(Ui.Btn(Loc.T("main.export"), ExportSettings), Ui.Btn(Loc.T("main.import"), ImportSettings)));
 
-        panel.Children.Add(Ui.Header("Журнал"));
-        panel.Children.Add(Ui.Check("Вести журнал", _scene.WriteLog, v =>
+        panel.Children.Add(Ui.Header(Loc.T("main.logs")));
+        panel.Children.Add(Ui.Check(Loc.T("main.log"), _scene.WriteLog, v =>
         {
             _scene.WriteLog = v;
             ProbeLog.Configure(Scene.LogPath, v);
@@ -554,8 +596,8 @@ public sealed partial class MainWindow : Window
         grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
 
-        var header = Ui.Header("Фигуры",
-            "Одна фигура на каждое светящееся устройство. Параметры выбранной фигуры открываются панелью поверх холста.");
+        var header = Ui.Header(Loc.T("devices.fixtures"),
+            Loc.T("devices.fixtures.note"));
         Grid.SetRow(header, 0);
         grid.Children.Add(header);
 
@@ -569,33 +611,33 @@ public sealed partial class MainWindow : Window
         grid.Children.Add(_fixtureList);
 
         var buttons = Ui.Row(
-            Ui.Btn("Добавить", AddFixture),
-            Ui.Btn("Копия", DuplicateFixture),
-            Ui.Btn("Удалить", RemoveFixture));
+            Ui.Btn(Loc.T("devices.add"), AddFixture),
+            Ui.Btn(Loc.T("devices.copy"), DuplicateFixture),
+            Ui.Btn(Loc.T("devices.remove"), RemoveFixture));
         buttons.Margin = new Thickness(0, 0, 0, 0);
         Grid.SetRow(buttons, 2);
         grid.Children.Add(buttons);
 
-        var showDisabled = Ui.Check("Отображать отключённые", _scene.ShowDisabled,
+        var showDisabled = Ui.Check(Loc.T("devices.showdisabled"), _scene.ShowDisabled,
             v => { _scene.ShowDisabled = v; Touch(); },
-            "Фигуры, снятые с раскраски, перестают рисоваться на холсте. Выбранная фигура рисуется в любом случае.");
+            Loc.T("devices.showdisabled.note"));
         Grid.SetRow(showDisabled, 3);
         grid.Children.Add(showDisabled);
 
-        AddSection("Устройства", "\uE772", Ui.Card(grid));
+        AddSection(Loc.T("tab.devices"), "\uE772", Ui.Card(grid));
         SyncFixtureList();
     }
 
-    void BuildCaptureSection() => AddSection("Захват", "\uE7F4", panel =>
+    void BuildCaptureSection() => AddSection(Loc.T("tab.capture"), "\uE7F4", panel =>
     {
-        panel.Children.Add(Ui.Header("Источник кадров"));
+        panel.Children.Add(Ui.Header(Loc.T("capture.source")));
 
         var box = new ComboBox { Margin = new Thickness(0, 2, 0, 0) };
-        box.Items.Add("Получать от Rimlight");
-        box.Items.Add("Свой захват: автоматически");
-        box.Items.Add("Свой захват: только DDA");
-        box.Items.Add("Свой захват: только WGC");
-        box.Items.Add("Свой захват: только GDI");
+        box.Items.Add(Loc.T("capture.fromrimlight"));
+        box.Items.Add(Loc.T("capture.auto"));
+        box.Items.Add(Loc.T("capture.dda"));
+        box.Items.Add(Loc.T("capture.wgc"));
+        box.Items.Add(Loc.T("capture.gdi"));
         box.SelectedIndex = (int)_scene.CaptureSource;
         box.SelectionChanged += (_, _) =>
         {
@@ -605,9 +647,8 @@ public sealed partial class MainWindow : Window
             Touch();
         };
 
-        panel.Children.Add(Ui.Labeled("Метод", box,
-            "От Rimlight кадры приходят через разделяемую память, свой захват при этом не работает. " +
-            "«Автоматически» держит DDA и WGC вместе и переходит на GDI, когда те перестают выдавать кадры."));
+        panel.Children.Add(Ui.Labeled(Loc.T("capture.method"), box,
+            Loc.T("capture.method.note")));
 
         // ---- экран
         bool ourCapture = _scene.CaptureSource != CaptureSource.FromRimlight;
@@ -636,19 +677,20 @@ public sealed partial class MainWindow : Window
             Touch();
         };
 
-        panel.Children.Add(Ui.Labeled("Экран", monitorBox,
-            "Монитор для захвата. При режиме получения от Rimlight выбор определяется им."));
+        panel.Children.Add(Ui.Labeled(Loc.T("capture.screen"), monitorBox,
+            Loc.T("capture.screen.note")));
 
-        panel.Children.Add(Ui.Note($"Прямоугольник монитора: {_scene.Monitor.Width:F0} × {_scene.Monitor.Height:F0} мм"));
+        panel.Children.Add(Ui.Note(string.Format(Loc.T("capture.rect"),
+            _scene.Monitor.Width.ToString("F0"), _scene.Monitor.Height.ToString("F0"))));
 
-        panel.Children.Add(Ui.Slider("Кадров в секунду", _scene.MaxFps, 1, 120, 1, v => { _scene.MaxFps = (int)v; Touch(); }, "",
-            "Верхний предел для быстрых устройств. Медленным задаётся свой делитель в параметрах фигуры."));
+        panel.Children.Add(Ui.Slider(Loc.T("capture.fps"), _scene.MaxFps, 1, 120, 1, v => { _scene.MaxFps = (int)v; Touch(); }, "",
+            Loc.T("capture.fps.note")));
 
-        panel.Children.Add(Ui.Slider("Область выборки", _scene.SampleRadiusMm, 1, 100, 1,
-            v => { _scene.SampleRadiusMm = Math.Max(1, v); ShowSampleArea(); Touch(); }, " мм",
-            "Размер участка экрана, усредняемого для одного диода. При малом значении цвет меняется от любого движения в кадре, при большом усредняется до однородного оттенка."));
+        panel.Children.Add(Ui.Slider(Loc.T("capture.radius"), _scene.SampleRadiusMm, 1, 100, 1,
+            v => { _scene.SampleRadiusMm = Math.Max(1, v); ShowSampleArea(); Touch(); }, Loc.T("unit.mm"),
+            Loc.T("capture.radius.note")));
 
-        panel.Children.Add(Ui.Header("Статистика"));
+        panel.Children.Add(Ui.Header(Loc.T("capture.stats")));
         panel.Children.Add(BuildStats());
     });
 
@@ -667,8 +709,12 @@ public sealed partial class MainWindow : Window
         _view.InvalidateVisual();
     }
 
-    static readonly string[] StatRows =
-        { "Источник", "Состояние", "Кадры", "Частота", "Задержка", "Диодов", "OpenRGB" };
+    /// <summary>
+    /// Собирается заново на каждый вызов: подписи зависят от языка, а массив, посчитанный
+    /// один раз при загрузке типа, оставался бы на языке, который стоял при запуске.
+    /// </summary>
+    static string[] StatRows() => new[]
+        { Loc.T("stats.source"), Loc.T("stats.state"), Loc.T("stats.frames"), Loc.T("stats.rate"), Loc.T("stats.latency"), Loc.T("stats.leds"), "OpenRGB" };
 
     /// <summary>
     /// The statistics as a two-column table.
@@ -683,15 +729,16 @@ public sealed partial class MainWindow : Window
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
 
-        _statValues = new TextBlock[StatRows.Length];
+        var rows = StatRows();
+        _statValues = new TextBlock[rows.Length];
 
-        for (int i = 0; i < StatRows.Length; i++)
+        for (int i = 0; i < rows.Length; i++)
         {
             grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
 
             var label = new TextBlock
             {
-                Text = StatRows[i],
+                Text = rows[i],
                 Foreground = Ui.FgDim,
                 FontSize = Ui.TextSize,
                 Margin = new Thickness(0, 2, 14, 2)
@@ -717,19 +764,19 @@ public sealed partial class MainWindow : Window
         return grid;
     }
 
-    void BuildPowerSection() => AddSection("Питание", "\uE7E8", panel =>
+    void BuildPowerSection() => AddSection(Loc.T("tab.power"), "\uE7E8", panel =>
     {
-        panel.Children.Add(Ui.Header("Гасить подсветку"));
-        panel.Children.Add(Ui.Check("при выходе из программы", _scene.OffOnExit, v => { _scene.OffOnExit = v; Touch(); }));
-        panel.Children.Add(Ui.Check("когда экран выключен", _scene.OffOnDisplayOff, v => { _scene.OffOnDisplayOff = v; Touch(); }));
-        panel.Children.Add(Ui.Check("при блокировке сессии", _scene.OffOnLock, v => { _scene.OffOnLock = v; Touch(); }));
-        panel.Children.Add(Ui.Check("при уходе в сон", _scene.OffOnSuspend, v => { _scene.OffOnSuspend = v; Touch(); }));
+        panel.Children.Add(Ui.Header(Loc.T("power.off")));
+        panel.Children.Add(Ui.Check(Loc.T("power.off.exit"), _scene.OffOnExit, v => { _scene.OffOnExit = v; Touch(); }));
+        panel.Children.Add(Ui.Check(Loc.T("power.off.display"), _scene.OffOnDisplayOff, v => { _scene.OffOnDisplayOff = v; Touch(); }));
+        panel.Children.Add(Ui.Check(Loc.T("power.off.lock"), _scene.OffOnLock, v => { _scene.OffOnLock = v; Touch(); }));
+        panel.Children.Add(Ui.Check(Loc.T("power.off.sleep"), _scene.OffOnSuspend, v => { _scene.OffOnSuspend = v; Touch(); }));
 
-        panel.Children.Add(Ui.Header("После пробуждения"));
+        panel.Children.Add(Ui.Header(Loc.T("power.wake")));
 
         var wakeBox = new ComboBox { Margin = new Thickness(0, 2, 0, 8) };
-        wakeBox.Items.Add("Ничего не делать");
-        wakeBox.Items.Add("Перезапустить OpenRGB");
+        wakeBox.Items.Add(Loc.T("power.wake.nothing"));
+        wakeBox.Items.Add(Loc.T("power.wake.restart"));
         wakeBox.SelectedIndex = Math.Max(0, Array.IndexOf(WakeModes, WakeMode));
         wakeBox.SelectionChanged += (_, _) =>
         {
@@ -737,17 +784,14 @@ public sealed partial class MainWindow : Window
             _scene.WakeRecovery = WakeModes[wakeBox.SelectedIndex];
             Touch();
         };
-        panel.Children.Add(Ui.Labeled("Что делать", wakeBox,
-            "Во сне контроллеры переподключаются к USB, а работавший сервер продолжает запись в прежние дескрипторы и возвращает признак успеха: " +
-            "подсветка при этом остаётся в состоянии, установленном при подаче питания. Перезапуск возвращает управление."));
+        panel.Children.Add(Ui.Labeled(Loc.T("power.wake.what"), wakeBox,
+            Loc.T("power.wake.note")));
 
-        panel.Children.Add(Ui.Row(Ui.Btn("Перезапустить OpenRGB сейчас", RestartServerNow)));
+        panel.Children.Add(Ui.Row(Ui.Btn(Loc.T("power.restartnow"), RestartServerNow)));
 
-        panel.Children.Add(Ui.Slider("Пауза после пробуждения", _scene.ResumeDelayMs / 1000.0, 0, 30, 1,
-            v => { _scene.ResumeDelayMs = (int)(v * 1000); Touch(); }, " с",
-            "Сколько не трогать подсветку после выхода из сна. При перезапуске пауза откладывает сам перезапуск: контроллеры в это время " +
-            "переподключаются к USB, а поиск устройств по неустоявшейся шине даёт неполный список. В режиме «Ничего не делать» пауза " +
-            "откладывает первую запись, потому что сервер продолжает работать с прежними дескрипторами."));
+        panel.Children.Add(Ui.Slider(Loc.T("power.delay"), _scene.ResumeDelayMs / 1000.0, 0, 30, 1,
+            v => { _scene.ResumeDelayMs = (int)(v * 1000); Touch(); }, Loc.T("unit.s"),
+            Loc.T("power.delay.note")));
     });
 
     /// <summary>
@@ -760,21 +804,18 @@ public sealed partial class MainWindow : Window
     WakeRecovery WakeMode =>
         _scene.WakeRecovery == WakeRecovery.Rescan ? WakeRecovery.RestartServer : _scene.WakeRecovery;
 
-    void BuildAboutSection() => AddSection("О программе", "\uE897", panel =>
+    void BuildAboutSection() => AddSection(Loc.T("tab.about"), "\uE897", panel =>
     {
         panel.Children.Add(Ui.Header("CaseLight " + AppVersion));
 
-        panel.Children.Add(Ui.Note("Подсветка внутри корпуса воспроизводит изображение с экрана. Каждое светящееся устройство " +
-                                   "описывается там, где оно физически стоит, и получает цвет с ближайшего к нему участка экрана."));
+        panel.Children.Add(Ui.Note(Loc.T("about.text")));
 
-        panel.Children.Add(Ui.Note("Управление идёт через OpenRGB: устройства на ARGB-контроллере и оперативная память на шине SMBus. " +
-                                   "Сервер запускается программой, если не запущен, и перезапускается после выхода из сна."));
+        panel.Children.Add(Ui.Note(Loc.T("about.text2")));
 
-        panel.Children.Add(Ui.Note("Кадры берутся собственным захватом или принимаются от Rimlight, подсветки монитора. " +
-                                   "Rimlight не обязателен."));
+        panel.Children.Add(Ui.Note(Loc.T("about.text3")));
 
-        panel.Children.Add(Ui.Link("Репозиторий:", "https://github.com/Wa1den/CaseLight"));
-        panel.Children.Add(Ui.Link("Rimlight, подсветка монитора:", "https://github.com/Wa1den/Rimlight"));
+        panel.Children.Add(Ui.Link(Loc.T("about.repo"), "https://github.com/Wa1den/CaseLight"));
+        panel.Children.Add(Ui.Link(Loc.T("about.rimlight"), "https://github.com/Wa1den/Rimlight"));
         panel.Children.Add(Ui.Link("OpenRGB:", "https://openrgb.org"));
     });
 
@@ -846,7 +887,7 @@ public sealed partial class MainWindow : Window
         _saved = _scene.Clone();
         _saved.Save();
         UpdateDirtyBar();
-        Say("Настройки применены и сохранены.");
+        Say(Loc.P("Настройки применены и сохранены.", "Settings applied and saved."));
     }
 
     void CancelChanges()
@@ -861,30 +902,30 @@ public sealed partial class MainWindow : Window
         _painter.Invalidate();
         _view.InvalidateVisual();
         UpdateDirtyBar();
-        Say("Изменения отменены.");
+        Say(Loc.P("Изменения отменены.", "Changes discarded."));
     }
 
     void ExportSettings()
     {
         var dialog = new Microsoft.Win32.SaveFileDialog
         {
-            Title = "Экспорт настроек CaseLight",
-            Filter = "Настройки CaseLight (*.json)|*.json",
+            Title = Loc.T("main.exporttitle"),
+            Filter = Loc.T("main.filter"),
             FileName = "caselight-settings.json"
         };
 
         if (dialog.ShowDialog() != true) return;
 
-        try { _scene.Save(dialog.FileName); Say("Экспортировано: " + dialog.FileName); }
-        catch (Exception ex) { Say("Не удалось сохранить: " + ex.Message); }
+        try { _scene.Save(dialog.FileName); Say(Loc.P("Экспортировано: ", "Exported: ") + dialog.FileName); }
+        catch (Exception ex) { Say(Loc.P("Не удалось сохранить: ", "Could not save: ") + ex.Message); }
     }
 
     void ImportSettings()
     {
         var dialog = new Microsoft.Win32.OpenFileDialog
         {
-            Title = "Импорт настроек CaseLight",
-            Filter = "Настройки CaseLight (*.json)|*.json"
+            Title = Loc.T("main.importtitle"),
+            Filter = Loc.T("main.filter")
         };
 
         if (dialog.ShowDialog() != true) return;
@@ -901,11 +942,11 @@ public sealed partial class MainWindow : Window
             _view.FitToContent();
             UpdateDirtyBar();
 
-            Say("Импортировано. Проверьте раскладку и нажмите «Применить».");
+            Say(Loc.P("Импортировано. Проверьте раскладку и нажмите «Применить».", "Imported. Check the layout and press «Apply»."));
         }
         catch (Exception ex)
         {
-            Say("Не удалось прочитать файл: " + ex.Message);
+            Say(Loc.P("Не удалось прочитать файл: ", "Could not read the file: ") + ex.Message);
         }
     }
 
@@ -916,9 +957,9 @@ public sealed partial class MainWindow : Window
         _power.Changed += (_, state) =>
         {
             string? reason =
-                state.Suspended && _scene.OffOnSuspend ? "сон" :
-                state.Locked && _scene.OffOnLock ? "блокировка" :
-                state.DisplayOff && _scene.OffOnDisplayOff ? "экран выключен" :
+                state.Suspended && _scene.OffOnSuspend ? Loc.P("сон", "sleep") :
+                state.Locked && _scene.OffOnLock ? Loc.P("блокировка", "locked") :
+                state.DisplayOff && _scene.OffOnDisplayOff ? Loc.P("экран выключен", "display off") :
                 null;
 
             if (state.Suspended) _wokeUp = false;
@@ -968,8 +1009,8 @@ public sealed partial class MainWindow : Window
 
         // Stop writing before touching the server: a restart would be writing into a dying
         // process.
-        _painter.Pause("восстановление после сна");
-        Say("Пробуждение: восстановление связи с OpenRGB.", 6000);
+        _painter.Pause(Loc.P("восстановление после сна", "recovery after sleep"));
+        Say(Loc.P("Пробуждение: восстановление связи с OpenRGB.", "Waking: restoring the connection to OpenRGB."), 6000);
 
         System.Threading.Tasks.Task.Run(() =>
         {
@@ -1001,9 +1042,10 @@ public sealed partial class MainWindow : Window
 
             Dispatcher.Invoke(() =>
             {
-                Say(back
-                    ? $"{what}; подсветка восстановлена"
-                    : $"{what}; сервер не отвечает, нажмите «Переподключиться»");
+                Say(string.Format(back
+                    ? Loc.P("{0}; подсветка восстановлена", "{0}; the lighting is back")
+                    : Loc.P("{0}; сервер не отвечает, нажмите «Переподключиться»",
+                            "{0}; the server is not responding, press «Reconnect»"), what));
 
                 BuildFixturePanel();
 
@@ -1015,6 +1057,8 @@ public sealed partial class MainWindow : Window
 
     void SetupTray()
     {
+        if (_tray != null) { _tray.Visible = false; _tray.Dispose(); }
+
         _tray = new System.Windows.Forms.NotifyIcon
         {
             Icon = TrayIcon(),
@@ -1023,11 +1067,11 @@ public sealed partial class MainWindow : Window
         };
 
         var menu = new System.Windows.Forms.ContextMenuStrip();
-        menu.Items.Add("Показать", null, (_, _) => RestoreFromTray());
-        menu.Items.Add("Старт", null, (_, _) => StartPainting());
-        menu.Items.Add("Стоп", null, (_, _) => StopPainting());
+        menu.Items.Add(Loc.T("tray.show"), null, (_, _) => RestoreFromTray());
+        menu.Items.Add(Loc.T("bar.start"), null, (_, _) => StartPainting());
+        menu.Items.Add(Loc.T("bar.stop"), null, (_, _) => StopPainting());
         menu.Items.Add(new System.Windows.Forms.ToolStripSeparator());
-        menu.Items.Add("Выход", null, (_, _) => { _reallyClosing = true; Close(); });
+        menu.Items.Add(Loc.T("tray.exit"), null, (_, _) => { _reallyClosing = true; Close(); });
 
         _tray.ContextMenuStrip = menu;
         _tray.DoubleClick += (_, _) => RestoreFromTray();
@@ -1056,13 +1100,14 @@ public sealed partial class MainWindow : Window
 
         if (_painter.IsRunning) SayFromTick(_painter.Status);
 
-        if (_statValues.Length == StatRows.Length)
+        if (_statValues.Length == StatRows().Length)
         {
             _statValues[0].Text = _painter.SourceInfo;
             _statValues[1].Text = _painter.Status;
-            _statValues[2].Text = $"принято {_painter.FramesReceived}, отрисовано {_painter.FramesPainted}";
-            _statValues[3].Text = $"{_painter.Fps:F1} в секунду";
-            _statValues[4].Text = $"{_painter.LastFrameAgeMs} мс";
+            _statValues[2].Text = string.Format(Loc.P("принято {0}, отрисовано {1}", "received {0}, painted {1}"),
+                                                _painter.FramesReceived, _painter.FramesPainted);
+            _statValues[3].Text = string.Format(Loc.P("{0} в секунду", "{0} per second"), _painter.Fps.ToString("F1"));
+            _statValues[4].Text = string.Format(Loc.P("{0} мс", "{0} ms"), _painter.LastFrameAgeMs);
             _statValues[5].Text = _painter.LedCount.ToString();
             _statValues[6].Text = _hub.Status;
         }
@@ -1103,7 +1148,8 @@ public sealed partial class MainWindow : Window
         _painter.Invalidate();
         _view.InvalidateVisual();
         UpdateDirtyBar();
-        Say($"Экран из Rimlight: {monitor.DisplayName}, {w:F0} × {h:F0} мм");
+        Say(string.Format(Loc.P("Экран из Rimlight: {0}, {1} × {2} мм", "Screen from Rimlight: {0}, {1} × {2} mm"),
+                          monitor.DisplayName, w.ToString("F0"), h.ToString("F0")));
 
         // the screen we are modelling has been settled by the bus, so remember which one
         _scene.MonitorDeviceName = _saved.MonitorDeviceName = monitor.DeviceName;
@@ -1141,7 +1187,7 @@ public sealed partial class MainWindow : Window
 
             if (_serverStartedTicks > 0 && now - _serverStartedTicks < OpenRgbLauncher.TypicalStartupMs)
             {
-                SayFromTick("OpenRGB запускается, идёт поиск устройств.", 1200);
+                SayFromTick(Loc.P("OpenRGB запускается, идёт поиск устройств.", "OpenRGB is starting, looking for devices."), 1200);
                 return;
             }
 
@@ -1149,7 +1195,7 @@ public sealed partial class MainWindow : Window
             // is not a plan: if it is gone and we are allowed to start it, start it.
             if (_scene.AutoStartOpenRgb && !OpenRgbLauncher.IsRunning())
             {
-                Say("OpenRGB не отвечает, идёт перезапуск.", 6000);
+                Say(Loc.P("OpenRGB не отвечает, идёт перезапуск.", "OpenRGB is not responding, restarting."), 6000);
                 EnsureServer();
             }
             return;
@@ -1179,7 +1225,7 @@ public sealed partial class MainWindow : Window
         }
         else if (_hub.Devices.Length == 0)
         {
-            Say("OpenRGB подключён, устройств пока нет: идёт поиск.");
+            Say(Loc.P("OpenRGB подключён, устройств пока нет: идёт поиск.", "OpenRGB connected, no devices yet: still looking."));
         }
         else
         {
@@ -1272,6 +1318,46 @@ public sealed partial class MainWindow : Window
         return _rail.DesiredSize.Width + PageWidth + frame;
     }
 
+    /// <summary>
+    /// Puts the window into the chosen language.
+    ///
+    /// The pages are built in code, so they are simply built again. What lives longer than a
+    /// page is relabelled by hand: the title, the buttons of the bottom bar, the unsaved
+    /// changes bar and the tray menu. The two switches carry a tooltip inside them and are
+    /// replaced whole rather than relabelled.
+    /// </summary>
+    void ApplyLanguage()
+    {
+        Loc.Load(_scene.Language);
+
+        Title = Loc.T("app.title");
+        _canvasToggle.Content = Loc.T("nav.canvas");
+        _startButton.Content = Loc.T("bar.start");
+        _stopButton.Content = Loc.T("bar.stop");
+        _fitButton.Content = Loc.T("bar.fit");
+        _applyButton.Content = Loc.T("bar.apply");
+        _cancelButton.Content = Loc.T("bar.cancel");
+        _dirtyText.Text = Loc.T("bar.dirty");
+
+        int at = _bottomBar.Children.IndexOf(_screenToggle);
+        _bottomBar.Children.RemoveAt(at);
+        _screenToggle = BuildScreenToggle();
+        _bottomBar.Children.Insert(at, _screenToggle);
+        _screenToggle.Visibility = _scene.ShowCanvas ? Visibility.Visible : Visibility.Collapsed;
+
+        SetupTray();
+        RebuildSections();
+        SyncFixtureList();
+        BuildFixturePanel();
+
+        // Ширина рейла меняется вместе с длиной подписей, а от неё считается узкое окно.
+        if (!_scene.ShowCanvas)
+        {
+            _canvasShown = null;
+            ApplyCanvasVisibility();
+        }
+    }
+
     /// <summary>Starts or stops showing the screen on the canvas, per the setting.</summary>
     void ApplyScreenPreview()
     {
@@ -1352,7 +1438,7 @@ public sealed partial class MainWindow : Window
 
     void ConnectHub()
     {
-        if (_recovering) { Say("Идёт восстановление связи.", 6000); return; }
+        if (_recovering) { Say(Loc.P("Идёт восстановление связи.", "Restoring the connection."), 6000); return; }
 
         EnsureServer();
         _hub.Connect(force: true);
@@ -1397,7 +1483,7 @@ public sealed partial class MainWindow : Window
         _painter.Start();
         _paintingWanted = true;
 
-        Say(_hub.IsReady ? "Раскраска запущена." : "Раскраска запущена, жду OpenRGB.");
+        Say(_hub.IsReady ? Loc.P("Раскраска запущена.", "Painting started.") : Loc.P("Раскраска запущена, жду OpenRGB.", "Painting started, waiting for OpenRGB."));
     }
 
     /// <summary>
@@ -1436,8 +1522,8 @@ public sealed partial class MainWindow : Window
     void RestartServerNow()
     {
         _recovering = true;
-        _painter.Pause("перезапуск OpenRGB");
-        Say("Перезапуск OpenRGB.", 6000);
+        _painter.Pause(Loc.P("перезапуск OpenRGB", "restarting OpenRGB"));
+        Say(Loc.P("Перезапуск OpenRGB.", "Restarting OpenRGB."), 6000);
 
         System.Threading.Tasks.Task.Run(() =>
         {
@@ -1460,7 +1546,8 @@ public sealed partial class MainWindow : Window
 
             Dispatcher.Invoke(() =>
             {
-                Say(back ? $"{what}; подключились заново" : $"{what}; сервер не отвечает");
+                Say(string.Format(back ? Loc.P("{0}; подключились заново", "{0}; connected again")
+                                       : Loc.P("{0}; сервер не отвечает", "{0}; the server is not responding"), what));
                 BuildFixturePanel();
 
                 _painter.Resume(0);
@@ -1474,7 +1561,7 @@ public sealed partial class MainWindow : Window
         _paintingWanted = false;
         StopTest();
         _painter.Stop();
-        Say("Раскраска остановлена, подсветка погашена.");
+        Say(Loc.P("Раскраска остановлена, подсветка погашена.", "Painting stopped, the lighting is off."));
     }
 
     // ---- геометрия окна ---------------------------------------------------

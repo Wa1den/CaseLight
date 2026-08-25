@@ -1,6 +1,8 @@
 using System.Threading;
 using System.Windows;
 
+using CaseLight.Core.Text;
+
 namespace CaseLight;
 
 /// <summary>
@@ -22,7 +24,7 @@ public partial class App : Application
         _single = new Mutex(true, @"Local\CaseLightSingleInstance", out bool first);
         if (!first)
         {
-            MessageBox.Show("CaseLight уже запущен.", "CaseLight",
+            MessageBox.Show(Loc.P("CaseLight уже запущен.", "CaseLight is already running."), "CaseLight",
                             MessageBoxButton.OK, MessageBoxImage.Information);
             Shutdown();
             return;

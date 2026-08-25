@@ -7,6 +7,8 @@ using System.Windows.Media;
 using CaseLight.Model;
 using CaseLight.Render;
 
+using CaseLight.Core.Text;
+
 namespace CaseLight;
 
 /// <summary>
@@ -22,7 +24,7 @@ public sealed partial class MainWindow
     sealed record FixtureItem(Fixture Fixture)
     {
         public override string ToString() =>
-            (Fixture.Enabled ? "" : "· выкл · ") + $"{Fixture.Name}  ({Fixture.LedCount})";
+            (Fixture.Enabled ? "" : Loc.P("· выкл · ", "· off · ")) + $"{Fixture.Name}  ({Fixture.LedCount})";
     }
 
     void SyncFixtureList()
@@ -42,7 +44,7 @@ public sealed partial class MainWindow
     {
         var f = new Fixture
         {
-            Name = "Фигура " + (_scene.Fixtures.Count + 1),
+            Name = Loc.P("Фигура ", "Fixture ") + (_scene.Fixtures.Count + 1),
             CenterX = _scene.Monitor.CenterX + _scene.Monitor.Width / 2 + 200,
             CenterY = _scene.Monitor.CenterY,
             Width = 120,
@@ -73,7 +75,7 @@ public sealed partial class MainWindow
 
         var copy = _view.Selected.Clone();
         copy.Id = Guid.NewGuid().ToString("N")[..8];
-        copy.Name = _view.Selected.Name + " (копия)";
+        copy.Name = _view.Selected.Name + Loc.P(" (копия)", " (copy)");
         copy.CenterX += 60;
         copy.CenterY += 60;
 
@@ -125,14 +127,14 @@ public sealed partial class MainWindow
             Width = 28,
             Height = 28,
             Padding = new Thickness(0),
-            ToolTip = "Закрыть параметры"
+            ToolTip = Loc.T("fixture.close")
         };
         close.Click += (_, _) => HideFixturePanel();
         DockPanel.SetDock(close, Dock.Right);
         head.Children.Add(close);
         head.Children.Add(new TextBlock
         {
-            Text = "Параметры фигуры",
+            Text = Loc.T("fixture.head"),
             Foreground = Ui.Fg,
             FontWeight = FontWeights.SemiBold,
             FontSize = 14,
@@ -140,15 +142,15 @@ public sealed partial class MainWindow
         });
         _fixturePanel.Children.Add(head);
 
-        _fixturePanel.Children.Add(Ui.Text("Название", f.Name, v => { f.Name = v; SyncFixtureList(); Touch(); }));
-        _fixturePanel.Children.Add(Ui.Check("Участвует в раскраске", f.Enabled, v => { f.Enabled = v; SyncFixtureList(); Touch(); }));
-        _fixturePanel.Children.Add(Ui.IntBox("Обновлять раз в N кадров", f.UpdateEvery, v => { f.UpdateEvery = Math.Max(1, v); Touch(); },
-            "1 — каждый кадр. Оперативной памяти требуется больше: она на шине SMBus, запись туда медленная и на полной частоте задерживает остальные устройства. Обычно достаточно 10–15."));
+        _fixturePanel.Children.Add(Ui.Text(Loc.T("fixture.name"), f.Name, v => { f.Name = v; SyncFixtureList(); Touch(); }));
+        _fixturePanel.Children.Add(Ui.Check(Loc.T("fixture.enabled"), f.Enabled, v => { f.Enabled = v; SyncFixtureList(); Touch(); }));
+        _fixturePanel.Children.Add(Ui.IntBox(Loc.T("fixture.every"), f.UpdateEvery, v => { f.UpdateEvery = Math.Max(1, v); Touch(); },
+            Loc.T("fixture.every.note")));
 
-        _fixturePanel.Children.Add(Ui.Row(Ui.Btn("Найти в корпусе", HighlightSelected)));
+        _fixturePanel.Children.Add(Ui.Row(Ui.Btn(Loc.T("fixture.locate"), HighlightSelected)));
 
         // ---- привязка
-        _fixturePanel.Children.Add(Ui.Header("Привязка к железу"));
+        _fixturePanel.Children.Add(Ui.Header(Loc.T("fixture.binding")));
 
         var deviceBox = new ComboBox { Margin = new Thickness(0, 2, 0, 8) };
         foreach (var d in _hub.Devices) deviceBox.Items.Add(d.Name);
@@ -167,7 +169,7 @@ public sealed partial class MainWindow
             BuildFixturePanel();
             Touch();
         };
-        _fixturePanel.Children.Add(Ui.Labeled("Контроллер", deviceBox));
+        _fixturePanel.Children.Add(Ui.Labeled(Loc.T("fixture.device"), deviceBox));
 
         var info = _hub.Find(f.Binding);
         if (info != null)
@@ -187,49 +189,48 @@ public sealed partial class MainWindow
                 BuildFixturePanel();
                 Touch();
             };
-            _fixturePanel.Children.Add(Ui.Labeled("Зона (разъём)", zoneBox));
+            _fixturePanel.Children.Add(Ui.Labeled(Loc.T("fixture.zone"), zoneBox));
         }
         else
         {
-            _fixturePanel.Children.Add(Ui.Note($"Контроллер «{f.Binding.DeviceName}» не виден: он отключён в OpenRGB " +
-                                               "либо сервер ещё не запущен. Фигура при этом не участвует в раскраске."));
+            _fixturePanel.Children.Add(Ui.Note(string.Format(Loc.T("fixture.missing"), f.Binding.DeviceName)));
         }
 
-        _fixturePanel.Children.Add(Ui.IntBox("Первый диод зоны", f.Binding.FirstLed, v => { f.Binding.FirstLed = Math.Max(0, v); Touch(); }));
-        _fixturePanel.Children.Add(Ui.IntBox("Сколько диодов", f.Binding.LedCount, v => { f.Binding.LedCount = Math.Max(0, v); Touch(); },
-            "Если на одном разъёме несколько устройств, их разводят по разным фигурам, поделив диапазон диодов."));
+        _fixturePanel.Children.Add(Ui.IntBox(Loc.T("fixture.first"), f.Binding.FirstLed, v => { f.Binding.FirstLed = Math.Max(0, v); Touch(); }));
+        _fixturePanel.Children.Add(Ui.IntBox(Loc.T("fixture.count"), f.Binding.LedCount, v => { f.Binding.LedCount = Math.Max(0, v); Touch(); },
+            Loc.T("fixture.count.note")));
 
         // ---- место
-        _fixturePanel.Children.Add(Ui.Header("Место в корпусе, мм"));
-        _fixturePanel.Children.Add(Ui.NumBox("Центр по горизонтали", f.CenterX, v => { f.CenterX = v; Touch(); }));
-        _fixturePanel.Children.Add(Ui.NumBox("Центр по вертикали", f.CenterY, v => { f.CenterY = v; Touch(); }));
+        _fixturePanel.Children.Add(Ui.Header(Loc.T("fixture.place")));
+        _fixturePanel.Children.Add(Ui.NumBox(Loc.T("fixture.x"), f.CenterX, v => { f.CenterX = v; Touch(); }));
+        _fixturePanel.Children.Add(Ui.NumBox(Loc.T("fixture.y"), f.CenterY, v => { f.CenterY = v; Touch(); }));
         // Only the dimensions the arrangement actually has. Across a strip, or across a
         // ring standing edge-on, the fixture is as wide as the sampling area covers, and a
         // field for it would be a number that changes nothing.
         if (f.Arrangement == Arrangement.Strip)
         {
-            _fixturePanel.Children.Add(Ui.NumBox("Длина", f.Width, v => { f.Width = Math.Max(5, v); Touch(); },
-                "Поперёк полосы размер задаёт область выборки."));
+            _fixturePanel.Children.Add(Ui.NumBox(Loc.T("fixture.length"), f.Width, v => { f.Width = Math.Max(5, v); Touch(); },
+                Loc.T("fixture.length.strip.note")));
         }
         else if (f.Arrangement == Arrangement.Closed && f.EdgeOn)
         {
-            _fixturePanel.Children.Add(Ui.NumBox("Длина", f.Height, v => { f.Height = Math.Max(5, v); Touch(); },
-                "Кольцо видно с торца, поперёк размер задаёт область выборки."));
+            _fixturePanel.Children.Add(Ui.NumBox(Loc.T("fixture.length"), f.Height, v => { f.Height = Math.Max(5, v); Touch(); },
+                Loc.T("fixture.length.ring.note")));
         }
         else if (f.Arrangement != Arrangement.Point)
         {
-            _fixturePanel.Children.Add(Ui.NumBox("Ширина", f.Width, v => { f.Width = Math.Max(5, v); Touch(); }));
-            _fixturePanel.Children.Add(Ui.NumBox("Высота", f.Height, v => { f.Height = Math.Max(5, v); Touch(); }));
+            _fixturePanel.Children.Add(Ui.NumBox(Loc.T("fixture.width"), f.Width, v => { f.Width = Math.Max(5, v); Touch(); }));
+            _fixturePanel.Children.Add(Ui.NumBox(Loc.T("fixture.height"), f.Height, v => { f.Height = Math.Max(5, v); Touch(); }));
         }
-        _fixturePanel.Children.Add(Ui.NumBox("Поворот, градусов", f.AngleDeg, v => { f.AngleDeg = v; Touch(); }));
+        _fixturePanel.Children.Add(Ui.NumBox(Loc.T("fixture.rotation"), f.AngleDeg, v => { f.AngleDeg = v; Touch(); }));
 
         // ---- раскладка
-        _fixturePanel.Children.Add(Ui.Header("Как идут диоды"));
+        _fixturePanel.Children.Add(Ui.Header(Loc.T("fixture.arrangement")));
 
         var kindBox = new ComboBox { Margin = new Thickness(0, 2, 0, 8) };
-        kindBox.Items.Add("Полоса — у ленты есть два конца");
-        kindBox.Items.Add("Замкнутое — кольцо или рамка");
-        kindBox.Items.Add("Точка — всё светится в одном месте");
+        kindBox.Items.Add(Loc.T("fixture.arr.strip"));
+        kindBox.Items.Add(Loc.T("fixture.arr.closed"));
+        kindBox.Items.Add(Loc.T("fixture.arr.point"));
         kindBox.SelectedIndex = f.Arrangement switch
         {
             Arrangement.Strip => 0,
@@ -247,29 +248,29 @@ public sealed partial class MainWindow
             BuildFixturePanel();
             Touch();
         };
-        _fixturePanel.Children.Add(Ui.Labeled("Форма", kindBox));
+        _fixturePanel.Children.Add(Ui.Labeled(Loc.T("fixture.shape"), kindBox));
 
         if (f.Arrangement == Arrangement.Closed)
         {
-            _fixturePanel.Children.Add(Ui.Check("Контур круглый", f.RoundContour, v => { f.RoundContour = v; BuildFixturePanel(); Touch(); }));
+            _fixturePanel.Children.Add(Ui.Check(Loc.T("fixture.round"), f.RoundContour, v => { f.RoundContour = v; BuildFixturePanel(); Touch(); }));
 
             if (!f.RoundContour)
-                _fixturePanel.Children.Add(Ui.Slider("Пропорции рамки", AspectToScale(f.ContourAspect), -10, 10, 0.1,
+                _fixturePanel.Children.Add(Ui.Slider(Loc.T("fixture.aspect"), AspectToScale(f.ContourAspect), -10, 10, 0.1,
                     v => { f.ContourAspect = ScaleToAspect(v); Touch(); }, "",
-                    "Физические пропорции устройства, если оно не квадратное: у рамки тройного вентилятора это примерно втрое выше.",
+                    Loc.T("fixture.aspect.note"),
                     format: DescribeAspect));
         }
 
         if (f.Arrangement != Arrangement.Point)
         {
             _fixturePanel.Children.Add(AnchorRow(f));
-            _fixturePanel.Children.Add(Ui.Check("Обход в другую сторону", f.Reverse, v => { f.Reverse = v; Touch(); }));
+            _fixturePanel.Children.Add(Ui.Check(Loc.T("fixture.reverse"), f.Reverse, v => { f.Reverse = v; Touch(); }));
         }
 
         if (f.Arrangement == Arrangement.Closed)
         {
-            _fixturePanel.Children.Add(Ui.Check("Обращена ребром к наблюдателю", f.EdgeOn, v => { f.EdgeOn = v; BuildFixturePanel(); Touch(); },
-                "Кольцо сводится к вертикальной линии, ширина фигуры на цвет тогда не влияет."));
+            _fixturePanel.Children.Add(Ui.Check(Loc.T("fixture.edgeon"), f.EdgeOn, v => { f.EdgeOn = v; BuildFixturePanel(); Touch(); },
+                Loc.T("fixture.edgeon.note")));
         }
     }
 
@@ -280,9 +281,8 @@ public sealed partial class MainWindow
     UIElement AnchorRow(Fixture f)
     {
         var panel = new StackPanel { Margin = new Thickness(0, 6, 0, 6) };
-        panel.Children.Add(Ui.Caption("Начальный диод",
-            "У замкнутого контура нет собственного первого диода, его назначают. Для вентилятора, обращённого ребром, это диод, расположенный внизу. " +
-            "Кнопка «показать» зажигает только его."));
+        panel.Children.Add(Ui.Caption(Loc.T("fixture.anchor"),
+            Loc.T("fixture.anchor.note")));
 
         var row = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 4, 0, 0) };
 
@@ -308,7 +308,7 @@ public sealed partial class MainWindow
         row.Children.Add(Ui.Btn("−", () => Move(-1)));
         row.Children.Add(value);
         row.Children.Add(Ui.Btn("+", () => Move(+1)));
-        row.Children.Add(Ui.Btn("показать", () => ShowAnchor(f)));
+        row.Children.Add(Ui.Btn(Loc.T("fixture.show"), () => ShowAnchor(f)));
 
         panel.Children.Add(row);
         return panel;
@@ -318,67 +318,65 @@ public sealed partial class MainWindow
     {
         if (_painter.IsRunning)
         {
-            Say("Раскраска перезапишет подсветку. Остановите её перед проверкой.");
+            Say(Loc.P("Раскраска перезапишет подсветку. Остановите её перед проверкой.", "The painting will overwrite the lighting. Stop it before checking."));
             return;
         }
 
         if (!_hub.Connect()) { Say(_hub.Status); return; }
 
         _hub.HighlightLed(f, f.AnchorLed, 255, 60, 0);
-        Say($"Горит только диод {f.AnchorLed}, он считается начальным.");
+        Say(string.Format(Loc.P("Горит только диод {0}, он считается начальным.",
+                                "Only LED {0} is lit, the one taken as the first."), f.AnchorLed));
     }
 
     void HighlightSelected()
     {
-        if (_view.Selected == null) { Say("Фигура не выбрана."); return; }
+        if (_view.Selected == null) { Say(Loc.P("Фигура не выбрана.", "No fixture selected.")); return; }
 
         if (_painter.IsRunning)
         {
-            Say("Раскраска перезапишет подсветку. Остановите её перед проверкой.");
+            Say(Loc.P("Раскраска перезапишет подсветку. Остановите её перед проверкой.", "The painting will overwrite the lighting. Stop it before checking."));
             return;
         }
 
         if (!_hub.Connect()) { Say(_hub.Status); return; }
 
         _hub.Highlight(_view.Selected, 255, 255, 255);
-        Say($"Горит только «{_view.Selected.Name}».");
+        Say(string.Format(Loc.P("Горит только «{0}».", "Only «{0}» is lit."), _view.Selected.Name));
     }
 
     // ---- вкладка цветов и тест размещения ---------------------------------
 
-    void BuildColorsSection() => AddSection("Цвета", "\uE790", panel =>
+    void BuildColorsSection() => AddSection(Loc.T("tab.color"), "\uE790", panel =>
     {
-        panel.Children.Add(Ui.Header("Коррекция"));
-        panel.Children.Add(Ui.Slider("Яркость", _scene.Brightness, 0, 1, 0.01, v => { _scene.Brightness = v; Touch(); }));
-        panel.Children.Add(Ui.Slider("Насыщенность", _scene.Saturation, 0, 3, 0.05, v => { _scene.Saturation = v; Touch(); }));
-        panel.Children.Add(Ui.Slider("Гамма", _scene.Gamma, 0.5, 4, 0.05, v => { _scene.Gamma = v; Touch(); }));
-        panel.Children.Add(Ui.Slider("Температура", _scene.TemperatureK, 1500, 15000, 100, v => { _scene.TemperatureK = (int)v; Touch(); }, " K"));
+        panel.Children.Add(Ui.Header(Loc.T("color.head")));
+        panel.Children.Add(Ui.Slider(Loc.T("color.brightness"), _scene.Brightness, 0, 1, 0.01, v => { _scene.Brightness = v; Touch(); }));
+        panel.Children.Add(Ui.Slider(Loc.T("color.saturation"), _scene.Saturation, 0, 3, 0.05, v => { _scene.Saturation = v; Touch(); }));
+        panel.Children.Add(Ui.Slider(Loc.T("color.gamma"), _scene.Gamma, 0.5, 4, 0.05, v => { _scene.Gamma = v; Touch(); }));
+        panel.Children.Add(Ui.Slider(Loc.T("color.temperature"), _scene.TemperatureK, 1500, 15000, 100, v => { _scene.TemperatureK = (int)v; Touch(); }, " K"));
         // Кубическая шкала: рабочие значения лежат около 0,003, и на линейной шкале весь ход
         // уходит на ту часть диапазона, где лента просто гаснет.
-        panel.Children.Add(Ui.Slider("Порог темноты", Math.Pow(_scene.MinLuma / 0.3, 1.0 / 3.0), 0, 1, 0.005,
+        panel.Children.Add(Ui.Slider(Loc.T("color.minluma"), Math.Pow(_scene.MinLuma / 0.3, 1.0 / 3.0), 0, 1, 0.005,
             v => { _scene.MinLuma = Math.Pow(v, 3) * 0.3; Touch(); }, "",
-            "Ниже этой яркости диод гаснет полностью. Нужен, когда на чёрном экране есть мелкие светлые детали: " +
-            "они поднимают среднюю яркость участка, и подсветка остаётся тускло гореть.",
-            format: v => v <= 0 ? "выключен"
+            Loc.T("color.minluma.note"),
+            format: v => v <= 0 ? Loc.T("off")
                                 : (Math.Pow(v, 3) * 0.3).ToString("0.0000", CultureInfo.InvariantCulture)));
 
-        panel.Children.Add(Ui.Slider("Обесцвечивать тёмное", _scene.ShadowNeutral, 0, 0.4, 0.01,
+        panel.Children.Add(Ui.Slider(Loc.T("color.shadow"), _scene.ShadowNeutral, 0, 0.4, 0.01,
             v => { _scene.ShadowNeutral = v; Touch(); }, "",
-            "Чем темнее участок, тем сильнее его цвет сводится к серому. Исключает случаи, когда слишком тёмный " +
-            "объект светит другим цветом: на малой яркости каналы диода светят неодинаково, и разница между ними " +
-            "читается как оттенок. Ноль отключает.",
-            format: v => v <= 0 ? "выключено" : v.ToString("0.##", CultureInfo.InvariantCulture)));
+            Loc.T("color.shadow.note"),
+            format: v => v <= 0 ? Loc.T("off") : v.ToString("0.##", CultureInfo.InvariantCulture)));
 
-        panel.Children.Add(Ui.Header("Баланс по каналам",
-            "Диоды разных устройств передают цвет по-разному. Здесь задаётся общая поправка."));
-        panel.Children.Add(Ui.Slider("Красный", _scene.GainR, 0, 2, 0.01, v => { _scene.GainR = v; Touch(); }));
-        panel.Children.Add(Ui.Slider("Зелёный", _scene.GainG, 0, 2, 0.01, v => { _scene.GainG = v; Touch(); }));
-        panel.Children.Add(Ui.Slider("Синий", _scene.GainB, 0, 2, 0.01, v => { _scene.GainB = v; Touch(); }));
+        panel.Children.Add(Ui.Header(Loc.T("color.gains"),
+            Loc.T("color.gains.note")));
+        panel.Children.Add(Ui.Slider(Loc.T("color.red"), _scene.GainR, 0, 2, 0.01, v => { _scene.GainR = v; Touch(); }));
+        panel.Children.Add(Ui.Slider(Loc.T("color.green"), _scene.GainG, 0, 2, 0.01, v => { _scene.GainG = v; Touch(); }));
+        panel.Children.Add(Ui.Slider(Loc.T("color.blue"), _scene.GainB, 0, 2, 0.01, v => { _scene.GainB = v; Touch(); }));
 
-        panel.Children.Add(Ui.Header("Плавность",
-            "Больше значение — быстрее переход. Привычнее выглядит быстрое нарастание и плавный спад."));
-        panel.Children.Add(Ui.Slider("Разгорается", _scene.SmoothingRise, 0.01, 1, 0.01, v => { _scene.SmoothingRise = v; Touch(); }));
-        panel.Children.Add(Ui.Slider("Гаснет", _scene.SmoothingFall, 0.01, 1, 0.01, v => { _scene.SmoothingFall = v; Touch(); }));
+        panel.Children.Add(Ui.Header(Loc.T("color.smoothing"),
+            Loc.T("color.smoothing.note")));
+        panel.Children.Add(Ui.Slider(Loc.T("color.rise"), _scene.SmoothingRise, 0.01, 1, 0.01, v => { _scene.SmoothingRise = v; Touch(); }));
+        panel.Children.Add(Ui.Slider(Loc.T("color.fall"), _scene.SmoothingFall, 0.01, 1, 0.01, v => { _scene.SmoothingFall = v; Touch(); }));
     });
 
     /// <summary>
@@ -387,18 +385,17 @@ public sealed partial class MainWindow
     /// It shares nothing with the colour settings except the pipeline it feeds: the point
     /// here is which fixture lights up, not what shade it lights up in.
     /// </summary>
-    void BuildTestSection() => AddSection("Тест размещения", "\uE890", panel =>
+    void BuildTestSection() => AddSection(Loc.T("tab.test"), "\uE890", panel =>
     {
-        panel.Children.Add(Ui.Header("Тест размещения",
-            "Вместо кадра экрана используется одно пятно, которое перемещается мышью по холсту. Вне пятна цвет чёрный, внутри — выбранный, " +
-            "проходящий через те же настройки. Так проверяется, что загорается именно то устройство, около которого стоит пятно."));
+        panel.Children.Add(Ui.Header(Loc.T("tab.test"),
+            Loc.T("test.note")));
 
-        _testButton = Ui.Btn(_painter.TestActive ? "Завершить тест" : "Запустить тест", ToggleTest, accent: true);
+        _testButton = Ui.Btn(_painter.TestActive ? Loc.T("test.stop") : Loc.T("test.start"), ToggleTest, accent: true);
         panel.Children.Add(Ui.Row(_testButton));
 
         var shapeBox = new ComboBox { Margin = new Thickness(0, 2, 0, 8) };
-        shapeBox.Items.Add("Круг");
-        shapeBox.Items.Add("Квадрат");
+        shapeBox.Items.Add(Loc.T("test.circle"));
+        shapeBox.Items.Add(Loc.T("test.square"));
         shapeBox.SelectedIndex = _scene.TestShape == TestShape.Circle ? 0 : 1;
         shapeBox.SelectionChanged += (_, _) =>
         {
@@ -407,16 +404,16 @@ public sealed partial class MainWindow
             PushTestPatch();
             Touch();
         };
-        panel.Children.Add(Ui.Labeled("Форма пятна", shapeBox));
+        panel.Children.Add(Ui.Labeled(Loc.T("test.shape"), shapeBox));
 
-        panel.Children.Add(Ui.Slider("Размер пятна", _scene.TestSizeMm, 20, 1200, 10, v =>
+        panel.Children.Add(Ui.Slider(Loc.T("test.size"), _scene.TestSizeMm, 20, 1200, 10, v =>
         {
             _scene.TestSizeMm = v;
             _view.TestSizeMm = v;
             _view.InvalidateVisual();
             PushTestPatch();
             Touch();
-        }, " мм"));
+        }, Loc.T("unit.mm")));
 
         var swatch = new Border
         {
@@ -429,7 +426,7 @@ public sealed partial class MainWindow
             Background = new SolidColorBrush(ParseColor(_scene.TestColor))
         };
 
-        panel.Children.Add(Ui.Row(swatch, Ui.Btn("Выбрать цвет…", () => PickTestColor(swatch))));
+        panel.Children.Add(Ui.Row(swatch, Ui.Btn(Loc.T("test.colour"), () => PickTestColor(swatch))));
     });
 
     /// <summary>
@@ -449,9 +446,9 @@ public sealed partial class MainWindow
         : 1;
 
     static string DescribeAspect(double scale) =>
-        scale >= 1.05 ? $"выше ×{scale.ToString("0.#", CultureInfo.InvariantCulture)}"
-        : scale <= -1.05 ? $"шире ×{(-scale).ToString("0.#", CultureInfo.InvariantCulture)}"
-        : "квадрат";
+        scale >= 1.05 ? string.Format(Loc.T("fixture.taller"), scale.ToString("0.#", CultureInfo.InvariantCulture))
+        : scale <= -1.05 ? string.Format(Loc.T("fixture.wider"), (-scale).ToString("0.#", CultureInfo.InvariantCulture))
+        : Loc.T("fixture.square");
 
     static Color ParseColor(string hex)
     {
@@ -510,8 +507,8 @@ public sealed partial class MainWindow
         _painter.UseScene(_scene);
         _painter.Start();
 
-        if (_testButton != null) _testButton.Content = "Завершить тест";
-        Say("Тест запущен. Пятно перемещается мышью по холсту.");
+        if (_testButton != null) _testButton.Content = Loc.T("test.stop");
+        Say(Loc.P("Тест запущен. Пятно перемещается мышью по холсту.", "Test running. The patch is moved around the canvas with the mouse."));
     }
 
     void StopTest()
@@ -527,8 +524,8 @@ public sealed partial class MainWindow
         _painter.SetTest(null);
         _painter.Stop();
 
-        if (_testButton != null) _testButton.Content = "Запустить тест";
-        Say("Тест завершён, подсветка погашена.");
+        if (_testButton != null) _testButton.Content = Loc.T("test.start");
+        Say(Loc.P("Тест завершён, подсветка погашена.", "Test finished, the lighting is off."));
     }
 
     /// <summary>Hands the painter the patch as it stands right now.</summary>

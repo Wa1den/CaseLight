@@ -5,6 +5,8 @@ using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
 
+using CaseLight.Core.Text;
+
 namespace CaseLight;
 
 /// <summary>
@@ -326,7 +328,7 @@ public static class Ui
         }
         catch (Exception ex)
         {
-            CaseLight.Core.Capture.ProbeLog.Log("ссылка", "не удалось открыть " + url + ": " + ex.Message);
+            CaseLight.Core.Capture.ProbeLog.Log(Loc.P("ссылка", "link"), Loc.P("не удалось открыть ", "could not open ") + url + ": " + ex.Message);
         }
     }
 

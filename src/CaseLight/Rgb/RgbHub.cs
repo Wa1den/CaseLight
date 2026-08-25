@@ -5,6 +5,8 @@ using CaseLight.Core.Capture;
 using CaseLight.Model;
 using OpenRGB.NET;
 
+using CaseLight.Core.Text;
+
 namespace CaseLight.Rgb;
 
 /// <summary>One zone of a controller, as the UI needs to see it.</summary>
@@ -72,7 +74,7 @@ public sealed class RgbHub : IDisposable
     /// forever. Readiness means devices, not a socket.
     /// </summary>
     public bool IsReady => _client != null && Devices.Length > 0;
-    public string Status { get; private set; } = "не подключено";
+    public string Status { get; private set; } = Loc.P("не подключено", "not connected");
     public DeviceInfo[] Devices { get; private set; } = Array.Empty<DeviceInfo>();
 
     /// <summary>Safe to call repeatedly; a failure is not retried for a couple of seconds.</summary>
@@ -101,11 +103,12 @@ public sealed class RgbHub : IDisposable
             _client = null;
             _devices = Array.Empty<Device>();
             Devices = Array.Empty<DeviceInfo>();
-            Status = "нет связи с OpenRGB: " + ex.Message;
+            Status = Loc.P("нет связи с OpenRGB: ", "no connection to OpenRGB: ") + ex.Message;
             return false;
         }
 
-        Status = $"подключено, контроллеров с диодами: {Devices.Length}";
+        Status = string.Format(Loc.P("подключено, контроллеров с диодами: {0}",
+                                     "connected, controllers with LEDs: {0}"), Devices.Length);
         return true;
     }
 
@@ -165,7 +168,7 @@ public sealed class RgbHub : IDisposable
     /// <summary>Lets go of a connection that has stopped answering. Call under <c>_io</c>.</summary>
     void DropClient(Exception ex)
     {
-        Status = "связь потеряна: " + ex.Message;
+        Status = Loc.P("связь потеряна: ", "connection lost: ") + ex.Message;
 
         try { _client?.Dispose(); } catch { /* уже мёртв */ }
         _client = null;
@@ -214,7 +217,8 @@ public sealed class RgbHub : IDisposable
         // Status is what the window shows, and it used to be written only when the
         // connection was made - so a list that filled up afterwards left the line saying
         // "0 controllers" over a case that was lit and working.
-        Status = $"подключено, контроллеров с диодами: {Devices.Length}";
+        Status = string.Format(Loc.P("подключено, контроллеров с диодами: {0}",
+                                     "connected, controllers with LEDs: {0}"), Devices.Length);
 
         // Per-LED control has to be re-established after every reconnect: a restarted
         // server brings its devices back in whatever mode they defaulted to. Only devices
@@ -257,13 +261,13 @@ public sealed class RgbHub : IDisposable
             // give the server a moment to pick the request up before the socket closes
             System.Threading.Thread.Sleep(300);
 
-            ProbeLog.Log("OpenRGB", "запрошено пересканирование устройств");
-            return "запрошено пересканирование устройств";
+            ProbeLog.Log("OpenRGB", Loc.P("запрошено пересканирование устройств", "a device rescan was requested"));
+            return Loc.P("запрошено пересканирование устройств", "a device rescan was requested");
         }
         catch (Exception ex)
         {
-            ProbeLog.Log("OpenRGB", "пересканирование не удалось: " + ex.Message);
-            return "пересканирование не удалось: " + ex.Message;
+            ProbeLog.Log("OpenRGB", Loc.P("пересканирование не удалось: ", "the rescan failed: ") + ex.Message);
+            return Loc.P("пересканирование не удалось: ", "the rescan failed: ") + ex.Message;
         }
     }
 
@@ -277,7 +281,7 @@ public sealed class RgbHub : IDisposable
 
         _listStale = false;
         try { Refresh(); }
-        catch (Exception ex) { Status = "не удалось перечитать список устройств: " + ex.Message; }
+        catch (Exception ex) { Status = Loc.P("не удалось перечитать список устройств: ", "could not re-read the device list: ") + ex.Message; }
         return true;
     }
 
@@ -409,7 +413,7 @@ public sealed class RgbHub : IDisposable
         }
         catch (Exception ex)
         {
-            Status = "связь потеряна: " + ex.Message;
+            Status = Loc.P("связь потеряна: ", "connection lost: ") + ex.Message;
             lock (_io)
             {
                 try { _client?.Dispose(); } catch { /* уже мёртв */ }
@@ -474,7 +478,7 @@ public sealed class RgbHub : IDisposable
         }
         catch (Exception ex)
         {
-            Status = "связь потеряна: " + ex.Message;
+            Status = Loc.P("связь потеряна: ", "connection lost: ") + ex.Message;
             return false;
         }
 

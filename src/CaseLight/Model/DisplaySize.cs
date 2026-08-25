@@ -2,6 +2,8 @@ using System;
 using System.Runtime.InteropServices;
 using CaseLight.Core.Capture;
 
+using CaseLight.Core.Text;
+
 namespace CaseLight.Model;
 
 /// <summary>
@@ -55,14 +57,19 @@ public static class DisplaySize
     {
         if (TryMeasure(monitor, out double w, out double h))
         {
-            ProbeLog.Log("экран", $"{monitor.DeviceName}: {monitor.Width}x{monitor.Height}, по EDID {w:F0}x{h:F0} мм");
+            ProbeLog.Log(Loc.P("экран", "screen"),
+                         string.Format(Loc.P("{0}: {1}x{2}, по EDID {3}x{4} мм", "{0}: {1}x{2}, {3}x{4} mm from EDID"),
+                                       monitor.DeviceName, monitor.Width, monitor.Height, w.ToString("F0"), h.ToString("F0")));
             return (w, h);
         }
 
         double width = currentWidthMm >= SaneMinMm ? currentWidthMm : 600;
         double height = width * Math.Max(1, monitor.Height) / Math.Max(1, monitor.Width);
 
-        ProbeLog.Log("экран", $"{monitor.DeviceName}: EDID без размера, высота посчитана от пропорций: {width:F0}x{height:F0} мм");
+        ProbeLog.Log(Loc.P("экран", "screen"),
+                     string.Format(Loc.P("{0}: EDID без размера, высота посчитана от пропорций: {1}x{2} мм",
+                                         "{0}: no size in EDID, height worked out from the proportions: {1}x{2} mm"),
+                                   monitor.DeviceName, width.ToString("F0"), height.ToString("F0")));
         return (width, height);
     }
 

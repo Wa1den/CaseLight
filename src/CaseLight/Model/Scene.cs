@@ -5,6 +5,8 @@ using System.Linq;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
+using CaseLight.Core.Text;
+
 namespace CaseLight.Model;
 
 /// <summary>Where the frames come from.</summary>
@@ -220,6 +222,12 @@ public sealed class Scene
     public string OpenRgbPath { get; set; } = "";
 
     /// <summary>
+    /// Language code, as a string rather than an enum: a language added as a file in the
+    /// lang folder has nowhere else to be written down.
+    /// </summary>
+    public string Language { get; set; } = "ru";
+
+    /// <summary>
     /// Only worth it for the SMBus, which is to say for DRAM. Everything else - the
     /// motherboard controller, the graphics card - is reachable without elevation, and
     /// staying unelevated means no UAC prompt at every login.
@@ -309,7 +317,7 @@ public sealed class Scene
     /// <summary>Throws on a bad file, so import can tell the user what went wrong.</summary>
     public static Scene Import(string path) =>
         JsonSerializer.Deserialize<Scene>(File.ReadAllText(path), Options)
-        ?? throw new InvalidOperationException("файл пуст или не содержит настроек");
+        ?? throw new InvalidOperationException(Loc.P("файл пуст или не содержит настроек", "the file is empty or holds no settings"));
 
     // ---- применить и отменить ---------------------------------------------
 

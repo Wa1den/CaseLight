@@ -10,6 +10,8 @@ using CaseLight.Core.Leds;
 using CaseLight.Model;
 using CaseLight.Rgb;
 
+using CaseLight.Core.Text;
+
 namespace CaseLight.Render;
 
 /// <summary>A stand-in for the screen: one patch of colour at a place on the scene.</summary>
@@ -111,7 +113,7 @@ public sealed class CasePainter : IDisposable
     /// <summary>Set by the window while the canvas is showing the screen.</summary>
     public volatile bool PreviewWanted;
 
-    public string Status { get; private set; } = "остановлено";
+    public string Status { get; private set; } = Loc.P("остановлено", "stopped");
     public bool IsRunning => _running;
     public bool IsPaused => _paused;
     public string PauseReason => _pauseReason;
@@ -222,7 +224,7 @@ public sealed class CasePainter : IDisposable
 
         StopCapture();
         _hub.Blackout();
-        Status = "остановлено";
+        Status = Loc.P("остановлено", "stopped");
     }
 
     /// <summary>Darkens the case and stops writing - for lock, sleep and display off.</summary>
@@ -260,11 +262,11 @@ public sealed class CasePainter : IDisposable
             // A background thread that throws takes the whole process with it. Losing the
             // painting is bad; losing an unsaved layout with it is worse.
             _running = false;
-            Status = "раскраска аварийно остановлена: " + ex.Message;
+            Status = Loc.P("раскраска аварийно остановлена: ", "the painting stopped with an error: ") + ex.Message;
 
             // Written down as well: the window shows the last line only until something
             // else is said, and a painting that died quietly is the hardest kind to explain.
-            ProbeLog.Log("раскраска", "аварийно остановлена: " + ex);
+            ProbeLog.Log(Loc.P("раскраска", "painting"), Loc.P("аварийно остановлена: ", "stopped with an error: ") + ex);
         }
     }
 
@@ -281,7 +283,7 @@ public sealed class CasePainter : IDisposable
 
             if (_paused)
             {
-                Status = "пауза: " + _pauseReason;
+                Status = Loc.P("пауза: ", "pause: ") + _pauseReason;
                 Thread.Sleep(200);
                 continue;
             }
@@ -289,7 +291,9 @@ public sealed class CasePainter : IDisposable
             long hold = _holdUntilTicks - Environment.TickCount64;
             if (hold > 0)
             {
-                Status = $"ожидание готовности устройств после сна: {hold / 1000.0:F0} с";
+                Status = string.Format(Loc.P("ожидание готовности устройств после сна: {0} с",
+                                             "waiting for the devices to settle after sleep: {0} s"),
+                                       (hold / 1000.0).ToString("F0"));
                 Thread.Sleep(Math.Min(500, (int)hold));
                 continue;
             }
@@ -313,7 +317,7 @@ public sealed class CasePainter : IDisposable
 
             if (_targets.Length == 0)
             {
-                Status = "нет включённых фигур с диодами";
+                Status = Loc.P("нет включённых фигур с диодами", "no enabled fixtures with LEDs");
                 Thread.Sleep(300);
                 continue;
             }
@@ -335,7 +339,7 @@ public sealed class CasePainter : IDisposable
             if (test != null)
             {
                 FillFromTest(test);
-                SourceInfo = "тестовое пятно";
+                SourceInfo = Loc.P("тестовое пятно", "test patch");
             }
             else if (_scene.CaptureSource == CaptureSource.FromRimlight)
             {
@@ -377,7 +381,7 @@ public sealed class CasePainter : IDisposable
             {
                 // The OpenRGB server dies on its own often enough that this is an expected
                 // state; reconnecting re-resolves every binding and restores direct mode.
-                Status = "связь с OpenRGB потеряна, переподключение";
+                Status = Loc.P("связь с OpenRGB потеряна, переподключение", "the connection to OpenRGB is lost, reconnecting");
                 Thread.Sleep(500);
                 continue;
             }
@@ -391,7 +395,7 @@ public sealed class CasePainter : IDisposable
                 Fps = framesThisSecond * 1000.0 / (tick - fpsWindow);
                 framesThisSecond = 0;
                 fpsWindow = tick;
-                Status = (test != null ? "тест размещения, " : "идёт раскраска, ") + Rate(Fps);
+                Status = (test != null ? Loc.P("тест размещения, ", "placement test, ") : Loc.P("идёт раскраска, ", "painting, ")) + Rate(Fps);
             }
 
             Thread.Sleep(periodMs);
@@ -409,12 +413,12 @@ public sealed class CasePainter : IDisposable
         int n = (int)Math.Round(fps);
         int tail = n % 100, last = n % 10;
 
-        string word = tail is >= 11 and <= 14 ? "кадров"
-                    : last == 1 ? "кадр"
-                    : last is >= 2 and <= 4 ? "кадра"
-                    : "кадров";
+        string word = tail is >= 11 and <= 14 ? Loc.P("кадров", "frames")
+                    : last == 1 ? Loc.P("кадр", "frame")
+                    : last is >= 2 and <= 4 ? Loc.P("кадра", "frames")
+                    : Loc.P("кадров", "frames");
 
-        return $"{n} {word} в секунду";
+        return string.Format(Loc.P("{0} {1} в секунду", "{0} {1} per second"), n, word);
     }
 
     /// <summary>
@@ -428,8 +432,8 @@ public sealed class CasePainter : IDisposable
     {
         if (!EnsureCapture())
         {
-            Status = "экран для захвата не найден";
-            SourceInfo = "нет источника";
+            Status = Loc.P("экран для захвата не найден", "the screen to capture was not found");
+            SourceInfo = Loc.P("нет источника", "no source");
             Thread.Sleep(500);
             return false;
         }
@@ -445,7 +449,8 @@ public sealed class CasePainter : IDisposable
 
         FramesReceived++;
         LastFrameAgeMs = 0;
-        SourceInfo = $"свой захват ({_scene.CaptureSource}), {w}×{h}, {_captureLabel}";
+        SourceInfo = string.Format(Loc.P("свой захват ({0}), {1}×{2}, {3}", "own capture ({0}), {1}×{2}, {3}"),
+                                   _scene.CaptureSource, w, h, _captureLabel);
 
         ZoneSampler.Sample(_image, w, h, stride, _zones, _sampled);
         KeepPreview(w, h, stride);
@@ -485,7 +490,9 @@ public sealed class CasePainter : IDisposable
         _captureMonitor = monitor.DeviceName;
         _captureLabel = monitor.DisplayName;
 
-        ProbeLog.Log("захват", $"свой захват {mode}, экран {monitor.DeviceName} {monitor.Width}x{monitor.Height}");
+        ProbeLog.Log(Loc.P("захват", "capture"),
+                     string.Format(Loc.P("свой захват {0}, экран {1} {2}x{3}", "own capture {0}, screen {1} {2}x{3}"),
+                                   mode, monitor.DeviceName, monitor.Width, monitor.Height));
         return true;
     }
 
@@ -504,8 +511,8 @@ public sealed class CasePainter : IDisposable
     {
         if (!_bus.TryAttach())
         {
-            Status = "ожидание кадров: " + _bus.Status;
-            SourceInfo = "нет источника";
+            Status = Loc.P("ожидание кадров: ", "waiting for frames: ") + _bus.Status;
+            SourceInfo = Loc.P("нет источника", "no source");
             Thread.Sleep(200);
             return false;
         }

@@ -1,6 +1,8 @@
 using System;
 using Microsoft.Win32;
 
+using CaseLight.Core.Text;
+
 namespace CaseLight;
 
 /// <summary>
@@ -33,25 +35,25 @@ public static class Autostart
         try
         {
             using var key = Registry.CurrentUser.OpenSubKey(KeyPath, writable: true);
-            if (key == null) return "не удалось открыть ветку автозапуска";
+            if (key == null) return Loc.P("не удалось открыть ветку автозапуска", "could not open the autostart key");
 
             if (enabled)
             {
-                if (string.IsNullOrEmpty(ExePath)) return "не удалось определить путь к программе";
+                if (string.IsNullOrEmpty(ExePath)) return Loc.P("не удалось определить путь к программе", "could not work out the path to the program");
                 key.SetValue(ValueName, "\"" + ExePath + "\"");
 
                 // Worth spelling out: CaseLight needs the OpenRGB server, and that one has
                 // to run as administrator to reach the SMBus at all. Starting with Windows
                 // only helps if OpenRGB is arranged to start too.
-                return "автозапуск включён: " + ExePath;
+                return Loc.P("автозапуск включён: ", "autostart on: ") + ExePath;
             }
 
             key.DeleteValue(ValueName, throwOnMissingValue: false);
-            return "автозапуск выключен";
+            return Loc.P("автозапуск выключен", "autostart off");
         }
         catch (Exception ex)
         {
-            return "не удалось изменить автозапуск: " + ex.Message;
+            return Loc.P("не удалось изменить автозапуск: ", "could not change the autostart: ") + ex.Message;
         }
     }
 }

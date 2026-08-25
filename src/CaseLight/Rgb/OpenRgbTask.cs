@@ -4,6 +4,8 @@ using System.IO;
 using System.Text;
 using CaseLight.Core.Capture;
 
+using CaseLight.Core.Text;
+
 namespace CaseLight.Rgb;
 
 /// <summary>
@@ -121,7 +123,7 @@ public static class OpenRgbTask
     public static string Create(string exePath)
     {
         if (string.IsNullOrWhiteSpace(exePath) || !File.Exists(exePath))
-            return "OpenRGB.exe не найден, задание не создано";
+            return Loc.P("OpenRGB.exe не найден, задание не создано", "OpenRGB.exe not found, no task created");
 
         string user = Environment.UserDomainName + "\\" + Environment.UserName;
         string xml = Path.Combine(Path.GetTempPath(), "caselight-openrgb-task.xml");
@@ -132,22 +134,22 @@ public static class OpenRgbTask
             File.WriteAllText(xml, BuildXml(exePath, user), Encoding.Unicode);
 
             if (!Elevated("schtasks", $"/create /tn \"{TaskName}\" /xml \"{xml}\" /f"))
-                return "создание задания отменено";
+                return Loc.P("создание задания отменено", "task creation cancelled");
 
             // schtasks returns before the registration is visible, hence the short wait
             Forget();
             for (int i = 0; i < 20 && !Exists(); i++) { Forget(); System.Threading.Thread.Sleep(200); }
 
             bool ok = Exists();
-            ProbeLog.Log("планировщик", ok ? "задание создано: " + exePath : "задание создать не удалось");
+            ProbeLog.Log(Loc.P("планировщик", "scheduler"), ok ? Loc.P("задание создано: ", "task created: ") + exePath : Loc.P("задание создать не удалось", "the task could not be created"));
             return ok
-                ? "OpenRGB будет запускаться при входе с правами администратора"
-                : "не удалось создать задание";
+                ? Loc.P("OpenRGB будет запускаться при входе с правами администратора", "OpenRGB will start at logon with administrator rights")
+                : Loc.P("не удалось создать задание", "could not create the task");
         }
         catch (Exception ex)
         {
-            ProbeLog.Log("планировщик", "ошибка создания задания: " + ex.Message);
-            return "не удалось создать задание: " + ex.Message;
+            ProbeLog.Log(Loc.P("планировщик", "scheduler"), Loc.P("ошибка создания задания: ", "task creation error: ") + ex.Message);
+            return Loc.P("не удалось создать задание: ", "could not create the task: ") + ex.Message;
         }
         finally
         {
@@ -160,17 +162,17 @@ public static class OpenRgbTask
         try
         {
             if (!Elevated("schtasks", $"/delete /tn \"{TaskName}\" /f"))
-                return "удаление задания отменено";
+                return Loc.P("удаление задания отменено", "task removal cancelled");
 
             Forget();
             for (int i = 0; i < 20 && Exists(); i++) { Forget(); System.Threading.Thread.Sleep(200); }
 
-            ProbeLog.Log("планировщик", "задание удалено");
-            return "задание удалено, автозапуск OpenRGB с правами выключен";
+            ProbeLog.Log(Loc.P("планировщик", "scheduler"), Loc.P("задание удалено", "task removed"));
+            return Loc.P("задание удалено, автозапуск OpenRGB с правами выключен", "task removed, the elevated autostart of OpenRGB is off");
         }
         catch (Exception ex)
         {
-            return "не удалось удалить задание: " + ex.Message;
+            return Loc.P("не удалось удалить задание: ", "could not remove the task: ") + ex.Message;
         }
     }
 
@@ -190,7 +192,7 @@ public static class OpenRgbTask
             int code = Run("schtasks", $"/run /tn \"{TaskName}\"", out string output);
             bool ok = code == 0;
 
-            ProbeLog.Log("планировщик", ok ? "сервер запущен заданием" : "запуск заданием не удался: " + output.Trim());
+            ProbeLog.Log(Loc.P("планировщик", "scheduler"), ok ? Loc.P("сервер запущен заданием", "server started by the task") : Loc.P("запуск заданием не удался: ", "starting by the task failed: ") + output.Trim());
             return ok;
         }
         catch
@@ -216,7 +218,7 @@ public static class OpenRgbTask
             int code = Run("schtasks", $"/end /tn \"{TaskName}\"", out string output);
             bool ok = code == 0;
 
-            ProbeLog.Log("планировщик", ok ? "сервер остановлен заданием" : "остановка заданием не удалась: " + output.Trim());
+            ProbeLog.Log(Loc.P("планировщик", "scheduler"), ok ? Loc.P("сервер остановлен заданием", "server stopped by the task") : Loc.P("остановка заданием не удалась: ", "stopping by the task failed: ") + output.Trim());
             return ok;
         }
         catch
