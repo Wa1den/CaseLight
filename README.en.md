@@ -85,7 +85,9 @@ enabled if both stop producing frames. The default rate is 30 frames per second.
 
 The other option is receiving frames from [Rimlight](https://github.com/Wa1den/Rimlight),
 the monitor bias lighting. The screen is then captured once for both programs. Frames are
-passed through shared memory, and Rimlight has to be set to publish them.
+passed through shared memory, and Rimlight has to be set to publish them. When Rimlight is
+running anyway, this is the better option: two parallel captures of one screen share the
+graphics card and both run slower.
 
 Code shared by the two programs (capture, colour pipeline, zone sampling, frame bus, power
 handling) is placed in `src/CaseLight.Core` as a separate copy. There is deliberately no
