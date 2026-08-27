@@ -452,10 +452,16 @@ public sealed class CasePainter : IDisposable
 
         _capture!.MinReduceIntervalMs = periodMs;
 
+        // Cleared before the check, not after: a frame published in between still sets the
+        // handle, so the wait below returns at once instead of missing it for a whole tick.
+        _capture.FrameSignal.Reset();
+
         if (!_capture.TryGetImage(ref _image, ref _captureVersion, out int w, out int h, out int stride) || w <= 0 || h <= 0)
         {
             // A still screen produces no frames at all; keep what the LEDs already show.
-            Thread.Sleep(periodMs);
+            // Waiting on the frame rather than sleeping a fixed slice: Thread.Sleep rounds
+            // up to 15.6 ms, so a sleep of a few milliseconds costs the whole timer tick.
+            _capture.FrameSignal.WaitOne(periodMs);
             return false;
         }
 
