@@ -37,6 +37,18 @@ public sealed class CasePainter : IDisposable
     readonly record struct Target(int DeviceIndex, int GlobalLed);
 
     /// <summary>Per-LED sampling needs enough pixels that each zone covers several.</summary>
+    /// <summary>
+    /// The capture throttle is set a little under the paint period.
+    ///
+    /// Exactly one period looks right and is not: capture and painting run on unrelated
+    /// clocks, so a frame arriving a hair early is thrown away and the picture waits a
+    /// whole extra period for the next one. Rimlight measured that beat and carries the
+    /// same slack; here it did not show up in a measurement with one capturer running, so
+    /// this is insurance rather than a fix for anything seen. A few percent more
+    /// reductions is what it costs.
+    /// </summary>
+    const double ReduceSlack = 0.8;
+
     const int ReduceWidth = 256;
 
     readonly RgbHub _hub;
@@ -282,8 +294,16 @@ public sealed class CasePainter : IDisposable
         }
     }
 
+    /// <summary>
+    /// Ритм всего цикла, включая паузы внутри чтения кадра: у Thread.Sleep шаг 15,6 мс,
+    /// и пауза на 16 мс превращается в 31.
+    /// </summary>
+    PrecisionTimer? _pacer;
+
     void PaintLoop()
     {
+        using var pacer = new PrecisionTimer();
+        _pacer = pacer;
         var clock = System.Diagnostics.Stopwatch.StartNew();
         double lastMs = 0;
         int framesThisSecond = 0;
@@ -377,7 +397,7 @@ public sealed class CasePainter : IDisposable
                 if (divider <= 1 || _frameNo % divider == 0)
                     _dueNow.Add(device);
 
-            if (_dueNow.Count == 0) { Thread.Sleep(periodMs); continue; }
+            if (_dueNow.Count == 0) { pacer.Wait(periodMs); continue; }
 
             _hub.BeginFrame();
             for (int i = 0; i < _targets.Length; i++)
@@ -410,8 +430,30 @@ public sealed class CasePainter : IDisposable
                 Status = (test != null ? Loc.P("тест размещения, ", "placement test, ") : Loc.P("идёт раскраска, ", "painting, ")) + Rate(Fps);
             }
 
-            Thread.Sleep(periodMs);
+            pacer.Wait(periodMs);
         }
+    }
+
+    /// <summary>Пауза заданной длины, точная в отличие от Thread.Sleep.</summary>
+    void Pace(int ms)
+    {
+        if (_pacer != null) _pacer.Wait(ms);
+        else Thread.Sleep(ms);
+    }
+
+    /// <summary>
+    /// Waits for the next frame of own capture, or for the period to run out.
+    ///
+    /// Both handles go into one WaitAny: the timeout argument of a wait rounds up to the
+    /// system tick the same way Thread.Sleep does, so the period is kept by the precision
+    /// timer and the frame signal is simply the second thing worth waking on.
+    /// </summary>
+    void WaitFrame(int ms)
+    {
+        if (_pacer?.Handle is not WaitHandle tick || _capture == null) { Thread.Sleep(ms); return; }
+
+        _pacer.Arm(ms);
+        WaitHandle.WaitAny(new[] { tick, _capture.FrameSignal });
     }
 
     /// <summary>
@@ -450,7 +492,7 @@ public sealed class CasePainter : IDisposable
             return false;
         }
 
-        _capture!.MinReduceIntervalMs = periodMs;
+        _capture!.MinReduceIntervalMs = periodMs * ReduceSlack;
 
         // Cleared before the check, not after: a frame published in between still sets the
         // handle, so the wait below returns at once instead of missing it for a whole tick.
@@ -459,9 +501,10 @@ public sealed class CasePainter : IDisposable
         if (!_capture.TryGetImage(ref _image, ref _captureVersion, out int w, out int h, out int stride) || w <= 0 || h <= 0)
         {
             // A still screen produces no frames at all; keep what the LEDs already show.
-            // Waiting on the frame rather than sleeping a fixed slice: Thread.Sleep rounds
-            // up to 15.6 ms, so a sleep of a few milliseconds costs the whole timer tick.
-            _capture.FrameSignal.WaitOne(periodMs);
+            // Waiting on the frame rather than sleeping a fixed slice: a wait with a timeout
+            // rounds up to 15.6 ms exactly like Thread.Sleep, so the timeout goes through the
+            // precision timer and the frame signal is waited on beside it.
+            WaitFrame(periodMs);
             return false;
         }
 
@@ -495,7 +538,7 @@ public sealed class CasePainter : IDisposable
         _capture = new HybridBackend
         {
             ReduceWidth = ReduceWidth,
-            MinReduceIntervalMs = 1000.0 / Math.Clamp(_scene.MaxFps, 1, 120),
+            MinReduceIntervalMs = 1000.0 / Math.Clamp(_scene.MaxFps, 1, 120) * ReduceSlack,
             UseDda = mode is CaptureSource.Auto or CaptureSource.DdaOnly,
             UseWgc = mode is CaptureSource.Auto or CaptureSource.WgcOnly,
             UseGdi = mode is CaptureSource.Auto or CaptureSource.GdiOnly
@@ -539,7 +582,7 @@ public sealed class CasePainter : IDisposable
         {
             // No new frame is normal - a still screen produces none at all. The LEDs keep
             // whatever they had rather than blinking off.
-            Thread.Sleep(periodMs);
+            Pace(periodMs);
             return false;
         }
 
