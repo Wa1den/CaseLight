@@ -37,6 +37,18 @@ public sealed class CasePainter : IDisposable
     readonly record struct Target(int DeviceIndex, int GlobalLed);
 
     /// <summary>Per-LED sampling needs enough pixels that each zone covers several.</summary>
+    /// <summary>
+    /// The capture throttle is set a little under the paint period.
+    ///
+    /// Exactly one period looks right and is not: capture and painting run on unrelated
+    /// clocks, so a frame arriving a hair early is thrown away and the picture waits a
+    /// whole extra period for the next one. Rimlight measured that beat and carries the
+    /// same slack; here it did not show up in a measurement with one capturer running, so
+    /// this is insurance rather than a fix for anything seen. A few percent more
+    /// reductions is what it costs.
+    /// </summary>
+    const double ReduceSlack = 0.8;
+
     const int ReduceWidth = 256;
 
     readonly RgbHub _hub;
@@ -480,7 +492,7 @@ public sealed class CasePainter : IDisposable
             return false;
         }
 
-        _capture!.MinReduceIntervalMs = periodMs;
+        _capture!.MinReduceIntervalMs = periodMs * ReduceSlack;
 
         // Cleared before the check, not after: a frame published in between still sets the
         // handle, so the wait below returns at once instead of missing it for a whole tick.
@@ -526,7 +538,7 @@ public sealed class CasePainter : IDisposable
         _capture = new HybridBackend
         {
             ReduceWidth = ReduceWidth,
-            MinReduceIntervalMs = 1000.0 / Math.Clamp(_scene.MaxFps, 1, 120),
+            MinReduceIntervalMs = 1000.0 / Math.Clamp(_scene.MaxFps, 1, 120) * ReduceSlack,
             UseDda = mode is CaptureSource.Auto or CaptureSource.DdaOnly,
             UseWgc = mode is CaptureSource.Auto or CaptureSource.WgcOnly,
             UseGdi = mode is CaptureSource.Auto or CaptureSource.GdiOnly
