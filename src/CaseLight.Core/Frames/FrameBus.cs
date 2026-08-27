@@ -22,14 +22,7 @@ namespace CaseLight.Core.Frames;
 /// </summary>
 public static class FrameBus
 {
-    /// <summary>
-    /// Session-local, so no elevation is needed and other sessions cannot see it.
-    ///
-    /// The name predates the project being renamed to Rimlight and stays as it is on
-    /// purpose: it is what both sides open, so changing it here would simply leave the two
-    /// processes looking at different memory. Renaming it means renaming it in both
-    /// repositories at once, and buying nothing for the trouble.
-    /// </summary>
+    /// <summary>Session-local, so no elevation is needed and other sessions cannot see it.</summary>
     public const string MapName = @"Local\AmbilightFrameBus";
 
     public const uint Magic = 0x42464C41;   // 'ALFB' little-endian
