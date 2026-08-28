@@ -20,7 +20,7 @@ public static class Loc
     /// silently shadowed newly reworded labels, so a mismatched version rewrites it. Only
     /// the two built-in files are rewritten; added languages are left alone.
     /// </summary>
-    const string Version = "2";
+    const string Version = "3";
 
     /// <summary>
     /// Bookkeeping entries rather than translated text: the version a file was written
@@ -373,7 +373,6 @@ public static class Loc
         ["about.text2"] = "Управление идёт через OpenRGB: устройства на ARGB-контроллере и оперативная память на шине SMBus. Сервер запускается программой, если не запущен, и перезапускается после выхода из сна.",
         ["about.text3"] = "Кадры берутся собственным захватом или принимаются от Rimlight, подсветки монитора. Rimlight не обязателен.",
         ["about.updates"] = "Проверять обновления при запуске",
-        ["about.updates.note"] = "Один запрос к GitHub при запуске: есть ли релиз новее. Это единственное обращение программы в сеть, и уходит в нём только название программы и текущая версия. Неудачная проверка проходит молча и пишется в журнал.",
         ["update.available"] = "Вышла версия {0}.",
         ["update.open"] = "Открыть страницу релиза",
         ["update.hide"] = "Скрыть до следующего запуска",
@@ -600,7 +599,6 @@ public static class Loc
         ["about.text2"] = "Everything is driven through OpenRGB: devices on the ARGB controller and memory modules on the SMBus. The server is started by the program if it is not running, and restarted after waking.",
         ["about.text3"] = "Frames come from own capture or are received from Rimlight, the monitor bias lighting. Rimlight is not required.",
         ["about.updates"] = "Check for updates at startup",
-        ["about.updates.note"] = "One request to GitHub on startup: is there a newer release. It is the only thing the program sends outside the machine, and all it carries is the program name and the current version. A failed check passes silently and goes to the log.",
         ["update.available"] = "Version {0} has been released.",
         ["update.open"] = "Open the release page",
         ["update.hide"] = "Hide until the next start",

@@ -988,7 +988,7 @@ public sealed partial class MainWindow : Window
         panel.Children.Add(Ui.Note(Loc.T("about.text3")));
 
         panel.Children.Add(Ui.Check(Loc.T("about.updates"), _scene.CheckUpdates,
-            v => { _scene.CheckUpdates = v; Touch(); }, Loc.T("about.updates.note")));
+            v => { _scene.CheckUpdates = v; Touch(); }));
 
         panel.Children.Add(Ui.Link(Loc.T("about.repo"), "https://github.com/Wa1den/CaseLight"));
         panel.Children.Add(Ui.Link(Loc.T("about.rimlight"), "https://github.com/Wa1den/Rimlight"));

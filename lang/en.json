@@ -126,7 +126,6 @@
   "about.text2": "Everything is driven through OpenRGB: devices on the ARGB controller and memory modules on the SMBus. The server is started by the program if it is not running, and restarted after waking.",
   "about.text3": "Frames come from own capture or are received from Rimlight, the monitor bias lighting. Rimlight is not required.",
   "about.updates": "Check for updates at startup",
-  "about.updates.note": "One request to GitHub on startup: is there a newer release. It is the only thing the program sends outside the machine, and all it carries is the program name and the current version. A failed check passes silently and goes to the log.",
   "update.available": "Version {0} has been released.",
   "update.open": "Open the release page",
   "update.hide": "Hide until the next start",
@@ -207,5 +206,5 @@
   "unit.s": " s",
   "off": "off",
   "_name": "English",
-  "_version": "2"
+  "_version": "3"
 }
