@@ -237,9 +237,15 @@ public static class Ui
     /// Turns the number into what it means, when the number alone does not say it. A ratio
     /// of 0.33 is a frame three times wider than it is tall, and nobody reads it that way.
     /// </param>
+    /// <param name="enabled">
+    /// Greys out the handle alone, the way <see cref="Check"/> does: the caption and its
+    /// explanation stay live, because a setting that cannot be moved is exactly the one
+    /// whose reason someone wants to read.
+    /// </param>
     public static UIElement Slider(string label, double value, double min, double max,
                                   double step, Action<double> set, string suffix = "",
-                                  string? help = null, Func<double, string>? format = null)
+                                  string? help = null, Func<double, string>? format = null,
+                                  bool enabled = true)
     {
         var caption = new TextBlock { Foreground = FgDim, FontSize = TextSize };
         var slider = new Slider
@@ -254,6 +260,7 @@ public static class Ui
             // fight the snapping, which feels like a slider that will not budge
             SmallChange = step,
             LargeChange = step * 5,
+            IsEnabled = enabled,
             Margin = new Thickness(0, 2, 0, 0)
         };
 
@@ -301,12 +308,7 @@ public static class Ui
         if (!string.IsNullOrEmpty(caption)) t.Inlines.Add(caption + " ");
 
         var link = new System.Windows.Documents.Hyperlink(new System.Windows.Documents.Run(url));
-
-        // The stock hyperlink is web-blue with a red hover, both hardcoded in its default
-        // style and neither readable on the dark theme. A local foreground wins over the
-        // style triggers, so the link stays in the theme's accent colour.
-        link.SetResourceReference(System.Windows.Documents.TextElement.ForegroundProperty,
-                                  "AccentTextFillColorPrimaryBrush");
+        StyleLink(link);
 
         link.Click += (_, _) => OpenUrl(url);
         t.Inlines.Add(link);
@@ -314,7 +316,63 @@ public static class Ui
         return t;
     }
 
-    static void OpenUrl(string url)
+    /// <summary>
+    /// The stock hyperlink is web-blue with a red hover, both hardcoded in its default
+    /// style and neither readable on the dark theme. A local foreground wins over the style
+    /// triggers, so the link stays in the theme's accent colour.
+    /// </summary>
+    public static void StyleLink(System.Windows.Documents.Hyperlink link) =>
+        link.SetResourceReference(System.Windows.Documents.TextElement.ForegroundProperty,
+                                  "AccentTextFillColorPrimaryBrush");
+
+    /// <summary>
+    /// A file path shown as a link that opens the folder holding it.
+    ///
+    /// The address was written out here anyway, and the folder it names is where the log,
+    /// the settings and the translations all live - so the line that says where the file is
+    /// is also the shortest way of getting to it.
+    /// </summary>
+    public static TextBlock PathLink(string path)
+    {
+        var t = new TextBlock
+        {
+            Foreground = FgDim,
+            FontSize = TextSize,
+            TextWrapping = TextWrapping.Wrap,
+            Margin = new Thickness(0, 4, 0, 8)
+        };
+
+        var link = new System.Windows.Documents.Hyperlink(new System.Windows.Documents.Run(path));
+        StyleLink(link);
+        link.Click += (_, _) => ShowInFolder(path);
+        t.Inlines.Add(link);
+
+        return t;
+    }
+
+    static void ShowInFolder(string path)
+    {
+        try
+        {
+            // /select opens the folder with the file itself highlighted; without it a file
+            // that does not exist yet - a log nobody switched on - would open nothing
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+            {
+                FileName = "explorer.exe",
+                Arguments = System.IO.File.Exists(path)
+                    ? $"/select,\"{path}\""
+                    : $"\"{System.IO.Path.GetDirectoryName(path)}\"",
+                UseShellExecute = true
+            });
+        }
+        catch (Exception ex)
+        {
+            CaseLight.Core.Capture.ProbeLog.Log(Loc.P("настройки", "settings"),
+                Loc.P("не удалось открыть папку ", "could not open the folder ") + path + ": " + ex.Message);
+        }
+    }
+
+    public static void OpenUrl(string url)
     {
         try
         {

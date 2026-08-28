@@ -51,9 +51,18 @@ public sealed class CasePainter : IDisposable
 
     const int ReduceWidth = 256;
 
+    /// <summary>
+    /// The shortest period the paint loop keeps, in milliseconds. This is what removing the
+    /// frame ceiling comes to: a period of zero would leave the thread spinning on a source
+    /// that hands over frames at its own pace, and nothing here is written 250 times a
+    /// second anyway - the slow buses have a divider of their own besides.
+    /// </summary>
+    const int MinPeriodMs = 4;
+
     readonly RgbHub _hub;
     readonly FrameSubscriber _bus = new();
     readonly ColorPipeline _pipeline = new();
+    readonly CropDetector _crop = new();
 
     /// <summary>Our own capture, used when the frames do not come from Rimlight.</summary>
     HybridBackend? _capture;
@@ -70,6 +79,14 @@ public sealed class CasePainter : IDisposable
 
     // одна запись на диод, в том же порядке, что и зоны выборки
     LedZone[] _zones = Array.Empty<LedZone>();
+
+    /// <summary>
+    /// The zones actually read from the frame: the same ones moved inside the picture while
+    /// the crop is in use, a straight copy otherwise. Kept apart from <see cref="_zones"/>
+    /// so the layout itself never moves - the canvas has to keep showing where the LEDs
+    /// are, whatever the black bars do.
+    /// </summary>
+    LedZone[] _sampleZones = Array.Empty<LedZone>();
     Target[] _targets = Array.Empty<Target>();
 
     /// <summary>Where each LED physically is - the test patch works in scene space, not screen space.</summary>
@@ -158,6 +175,9 @@ public sealed class CasePainter : IDisposable
     /// </summary>
     public string BusMonitorDeviceName { get; private set; } = "";
     public int LedCount => _targets.Length;
+
+    /// <summary>What the crop detector sees right now, for the line under its settings.</summary>
+    public CropRect Crop => _crop.Rect;
 
     public CasePainter(RgbHub hub, Scene scene)
     {
@@ -311,7 +331,15 @@ public sealed class CasePainter : IDisposable
 
         while (_running)
         {
-            int periodMs = (int)Math.Round(1000.0 / Math.Clamp(_scene.MaxFps, 1, 120));
+            int periodMs = PeriodMs(_scene.MaxFps);
+
+            // Switching the detector off has to reach the sampling even on a still screen,
+            // where no further frame is going to arrive to carry the change.
+            if (!_scene.AdaptiveCrop && !_crop.Rect.IsFull)
+            {
+                _crop.Reset();
+                RemapZones();
+            }
 
             if (_paused)
             {
@@ -367,6 +395,10 @@ public sealed class CasePainter : IDisposable
                 _hub.BlackoutOthers(_deviceDivider.Keys);
             }
 
+            // Read once at the top of the tick and used for both filters that count real
+            // time: the smoothing and the hold behind the crop.
+            double now = clock.Elapsed.TotalMilliseconds;
+
             var test = _test;
             if (test != null)
             {
@@ -376,14 +408,13 @@ public sealed class CasePainter : IDisposable
             else if (_scene.CaptureSource == CaptureSource.FromRimlight)
             {
                 StopCapture();
-                if (!TakeSharedFrame(periodMs)) continue;
+                if (!TakeSharedFrame(periodMs, now)) continue;
             }
-            else if (!TakeOwnFrame(periodMs))
+            else if (!TakeOwnFrame(periodMs, now))
             {
                 continue;
             }
 
-            double now = clock.Elapsed.TotalMilliseconds;
             double dt = now - lastMs;
             lastMs = now;
 
@@ -482,7 +513,7 @@ public sealed class CasePainter : IDisposable
     /// own, and it is the only option when Rimlight is not wanted at all - the case
     /// lighting has no reason to depend on the strip behind the monitor.
     /// </summary>
-    bool TakeOwnFrame(int periodMs)
+    bool TakeOwnFrame(int periodMs, double nowMs)
     {
         if (!EnsureCapture())
         {
@@ -513,7 +544,7 @@ public sealed class CasePainter : IDisposable
         SourceInfo = string.Format(Loc.P("свой захват ({0}), {1}×{2}, {3}", "own capture ({0}), {1}×{2}, {3}"),
                                    _scene.CaptureSource, w, h, _captureLabel);
 
-        ZoneSampler.Sample(_image, w, h, stride, _zones, _sampled);
+        SampleFrame(w, h, stride, periodMs, nowMs);
         KeepPreview(w, h, stride);
         return true;
     }
@@ -538,7 +569,7 @@ public sealed class CasePainter : IDisposable
         _capture = new HybridBackend
         {
             ReduceWidth = ReduceWidth,
-            MinReduceIntervalMs = 1000.0 / Math.Clamp(_scene.MaxFps, 1, 120) * ReduceSlack,
+            MinReduceIntervalMs = PeriodMs(_scene.MaxFps) * ReduceSlack,
             UseDda = mode is CaptureSource.Auto or CaptureSource.DdaOnly,
             UseWgc = mode is CaptureSource.Auto or CaptureSource.WgcOnly,
             UseGdi = mode is CaptureSource.Auto or CaptureSource.GdiOnly
@@ -568,7 +599,7 @@ public sealed class CasePainter : IDisposable
     }
 
     /// <summary>Pulls one frame off the bus; false means there is nothing to paint this tick.</summary>
-    bool TakeSharedFrame(int periodMs)
+    bool TakeSharedFrame(int periodMs, double nowMs)
     {
         if (!_bus.TryAttach())
         {
@@ -591,9 +622,51 @@ public sealed class CasePainter : IDisposable
         BusMonitorDeviceName = info.MonitorDeviceName;
         SourceInfo = $"Rimlight, {info.Width}×{info.Height}, {ScreenChoice.Label(info.MonitorDeviceName)}";
 
-        ZoneSampler.Sample(_image, info.Width, info.Height, info.Stride, _zones, _sampled);
+        SampleFrame(info.Width, info.Height, info.Stride, periodMs, nowMs);
         KeepPreview(info.Width, info.Height, info.Stride);
         return true;
+    }
+
+    /// <summary>
+    /// The paint period the setting comes to, in milliseconds. Zero means no ceiling, and
+    /// what is left then is the floor of the loop itself.
+    /// </summary>
+    static int PeriodMs(int maxFps) => maxFps > 0
+        ? Math.Max(MinPeriodMs, (int)Math.Round(1000.0 / Math.Clamp(maxFps, 1, 240)))
+        : MinPeriodMs;
+
+    /// <summary>When the detector last measured, so its hold time counts real elapsed time.</summary>
+    double _lastCropMs;
+
+    /// <summary>
+    /// Measures the black bars, when that is switched on, and reads the zones off the frame.
+    ///
+    /// The detector runs before the sampling and only on a frame that is actually new: a
+    /// still screen hands over no frames at all, and ageing the hold on those ticks would
+    /// let a reading that nothing confirmed reach the case.
+    /// </summary>
+    void SampleFrame(int width, int height, int stride, int periodMs, double nowMs)
+    {
+        if (_scene.AdaptiveCrop)
+        {
+            double dt = nowMs - _lastCropMs;
+            _lastCropMs = nowMs;
+
+            if (_crop.Update(_image, width, height, stride, _scene.ToCropSettings(),
+                             dt <= 0 || dt > 1000 ? periodMs : dt))
+                RemapZones();
+        }
+
+        ZoneSampler.Sample(_image, width, height, stride, _sampleZones, _sampled);
+    }
+
+    /// <summary>Puts the sampling zones onto the picture, leaving the layout where it is.</summary>
+    void RemapZones()
+    {
+        if (_sampleZones.Length != _zones.Length) _sampleZones = new LedZone[_zones.Length];
+
+        if (_crop.Rect.IsFull) Array.Copy(_zones, _sampleZones, _zones.Length);
+        else CropMapper.Apply(_zones, _sampleZones, _crop.Rect, _scene.CropStretch);
     }
 
     /// <summary>
@@ -667,6 +740,7 @@ public sealed class CasePainter : IDisposable
         GainR = _scene.GainR,
         GainG = _scene.GainG,
         GainB = _scene.GainB,
+        MinBacklight = _scene.MinBacklight,
         SmoothingRise = _scene.SmoothingRise,
         SmoothingFall = _scene.SmoothingFall,
         Dithering = false        // дизеринг разносит ошибку вдоль ленты; здесь диоды не в ряд
@@ -733,6 +807,7 @@ public sealed class CasePainter : IDisposable
         }
 
         _zones = zones.ToArray();
+        RemapZones();
         _targets = targets.ToArray();
         _world = world.ToArray();
         _sampled = new byte[_zones.Length * 3];

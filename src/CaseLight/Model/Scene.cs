@@ -6,6 +6,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 
 using CaseLight.Core.Text;
+using CaseLight.Render;
 
 namespace CaseLight.Model;
 
@@ -118,6 +119,16 @@ public sealed class Scene
     // ---- захват -----------------------------------------------------------
 
     public CaptureSource CaptureSource { get; set; } = CaptureSource.FromRimlight;
+
+    /// <summary>
+    /// Ceiling on how often the case is repainted, in frames per second. Zero removes the
+    /// ceiling and leaves only the floor of the paint loop itself.
+    ///
+    /// The ceiling is what saves graphics card work on own capture, and it is paid for in
+    /// latency: a frame that arrives inside the throttle window is dropped rather than
+    /// held, so the picture waits for the next one. Slow buses are not what this is for -
+    /// memory on the SMBus gets a divider of its own in <see cref="Fixture.UpdateEvery"/>.
+    /// </summary>
     public int MaxFps { get; set; } = 30;
 
     /// <summary>Which screen to capture ourselves. Empty means the primary one.</summary>
@@ -148,6 +159,16 @@ public sealed class Scene
     public double MinLuma { get; set; }
 
     /// <summary>
+    /// Level no channel of an LED drops below, 0..1 of the output scale. Zero switches it
+    /// off.
+    ///
+    /// Works with <see cref="MinLuma"/> rather than against it: the threshold decides what
+    /// counts as black, and this decides what black looks like. The lift is one amount
+    /// added to all three channels, so a dark scene that still carries a colour keeps it.
+    /// </summary>
+    public double MinBacklight { get; set; }
+
+    /// <summary>
     /// How far up the scale the colour is faded out of the shadows.
     ///
     /// White balance is a proportion, so it tints every level alike - and where the picture
@@ -168,6 +189,64 @@ public sealed class Scene
     public double SmoothingRise { get; set; } = 0.55;
     public double SmoothingFall { get; set; } = 0.18;
 
+    // ---- кадрирование -----------------------------------------------------
+
+    /// <summary>
+    /// Follows the black bars of letterboxed material and samples the picture inside them
+    /// instead of the whole screen. Off by default: it changes where every LED reads from,
+    /// which is not something to switch on behind the back of a layout already tuned by
+    /// hand.
+    /// </summary>
+    public bool AdaptiveCrop { get; set; }
+
+    /// <summary>Letterboxing - bars above and below. The common case, so on by default.</summary>
+    public bool CropVertical { get; set; } = true;
+
+    /// <summary>Pillarboxing - bars left and right. 4:3 material on a wide screen.</summary>
+    public bool CropHorizontal { get; set; } = true;
+
+    /// <summary>Below this a bar is taken for a dark edge and ignored. Percent of the side.</summary>
+    public double CropMinPercent { get; set; } = 2.0;
+
+    /// <summary>Ceiling on the crop, as a percent of the side.</summary>
+    public double CropMaxPercent { get; set; } = 14.0;
+
+    /// <summary>Per-channel value below which a pixel counts as black.</summary>
+    public int CropBlackLevel { get; set; } = 16;
+
+    /// <summary>
+    /// How much of a lit run inside the bar is stepped over rather than taken for the edge
+    /// of the picture - subtitles, the progress bar, the buttons of a player. Percent of
+    /// the side.
+    /// </summary>
+    public double CropOverlookPercent { get; set; } = 8.0;
+
+    /// <summary>How long a new reading has to hold before the sampling moves.</summary>
+    public double CropHoldMs { get; set; } = 700;
+
+    /// <summary>Extra margin taken inside the picture once a bar is found, percent of the side.</summary>
+    public double CropInsetPercent { get; set; } = 0.5;
+
+    /// <summary>
+    /// Spreads the picture across the whole layout, so an LED that reads from behind a bar
+    /// takes the nearest part of the picture instead of sitting dark. With this off the
+    /// sampling only slides clear of the bars and keeps its places otherwise.
+    /// </summary>
+    public bool CropStretch { get; set; } = true;
+
+    /// <summary>The subset the detector reads, on the same footing as the colour settings.</summary>
+    public CropSettings ToCropSettings() => new()
+    {
+        Vertical = CropVertical,
+        Horizontal = CropHorizontal,
+        MinPercent = CropMinPercent,
+        MaxPercent = CropMaxPercent,
+        BlackLevel = CropBlackLevel,
+        OverlookPercent = CropOverlookPercent,
+        HoldMs = CropHoldMs,
+        InsetPercent = CropInsetPercent
+    };
+
     /// <summary>
     /// Whether fixtures switched out of the painting are still drawn on the canvas.
     ///
@@ -175,7 +254,7 @@ public sealed class Scene
     /// the selected one is always drawn, otherwise picking it from the list would point at
     /// an empty patch of canvas.
     /// </summary>
-    public bool ShowDisabled { get; set; } = true;
+    public bool ShowDisabled { get; set; }
 
     /// <summary>
     /// Whether the captured frame is drawn on the canvas under the fixtures.
@@ -216,7 +295,7 @@ public sealed class Scene
     // ---- сервер OpenRGB ---------------------------------------------------
 
     /// <summary>Start the server ourselves when it is not up.</summary>
-    public bool AutoStartOpenRgb { get; set; } = true;
+    public bool AutoStartOpenRgb { get; set; }
 
     /// <summary>Empty means "find it yourself".</summary>
     public string OpenRgbPath { get; set; } = "";
@@ -226,6 +305,13 @@ public sealed class Scene
     /// lang folder has nowhere else to be written down.
     /// </summary>
     public string Language { get; set; } = "ru";
+
+    /// <summary>
+    /// Asks GitHub at startup whether a newer release exists. Off by default: it is the
+    /// only thing here that reaches outside the machine, and that is not a thing to start
+    /// doing without being asked.
+    /// </summary>
+    public bool CheckUpdates { get; set; }
 
     /// <summary>
     /// Only worth it for the SMBus, which is to say for DRAM. Everything else - the
@@ -286,7 +372,14 @@ public sealed class Scene
         Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "CaseLight");
 
     [JsonIgnore]
-    public static string DefaultPath => Path.Combine(Folder, "scene.json");
+    public static string DefaultPath => Path.Combine(Folder, "config.json");
+
+    /// <summary>
+    /// The name the settings had before, kept because a file of hand-placed fixtures is
+    /// worth hours at the case and must not be lost to a rename.
+    /// </summary>
+    [JsonIgnore]
+    public static string LegacyPath => Path.Combine(Folder, "scene.json");
 
     [JsonIgnore]
     public static string LogPath => Path.Combine(Folder, "caselight.log");
@@ -300,6 +393,7 @@ public sealed class Scene
 
     public static Scene Load(string? path = null)
     {
+        if (path == null) MigrateFromScene();
         path ??= DefaultPath;
         try
         {
@@ -312,6 +406,37 @@ public sealed class Scene
             // over it, and losing the layout silently is worse than starting empty.
         }
         return new Scene();
+    }
+
+    /// <summary>
+    /// Set when the migration failed, reported once the log destination is known. Load()
+    /// runs from a field initialiser, before the log has been pointed at the settings
+    /// folder, so logging here would leave a stray file next to the executable.
+    /// </summary>
+    [JsonIgnore]
+    public static string? MigrationNote { get; private set; }
+
+    /// <summary>
+    /// Carries the settings over from the old file name, once and without saying so.
+    ///
+    /// A copy rather than a move: the old file costs nothing where it lies, and leaving it
+    /// means a version of the program from before the rename still finds its settings.
+    /// Success is silent because nothing was asked - from the user's side the settings are
+    /// simply where they were.
+    /// </summary>
+    static void MigrateFromScene()
+    {
+        try
+        {
+            if (File.Exists(DefaultPath) || !File.Exists(LegacyPath)) return;
+
+            Directory.CreateDirectory(Folder);
+            File.Copy(LegacyPath, DefaultPath);
+        }
+        catch (Exception ex)
+        {
+            MigrationNote = "не удалось перенести scene.json: " + ex.Message;
+        }
     }
 
     /// <summary>Throws on a bad file, so import can tell the user what went wrong.</summary>
@@ -360,4 +485,41 @@ public sealed class Scene
     /// <summary>True when anything at all differs - what turns the apply bar on.</summary>
     public bool DiffersFrom(Scene other) =>
         JsonSerializer.Serialize(this, Options) != JsonSerializer.Serialize(other, Options);
+
+    // ---- умолчания --------------------------------------------------------
+
+    /// <summary>
+    /// What a reset leaves alone: everything that describes this particular machine rather
+    /// than a preference.
+    ///
+    /// The fixtures and the monitor rectangle are the layout itself, measured against the
+    /// case with a ruler; the screen and the language are what the installation is; the
+    /// window geometry is not edited by hand at all and is written on the way out. Every
+    /// other setting is reset by name lookup rather than from a list, so one added later is
+    /// covered without anyone having to remember this method.
+    /// </summary>
+    static readonly string[] Preserved =
+    {
+        nameof(Fixtures), nameof(Monitor),
+        nameof(MonitorDeviceName), nameof(MonitorModel),
+        nameof(Language),
+        nameof(WindowWidth), nameof(WindowHeight), nameof(WindowLeft), nameof(WindowTop),
+        nameof(WindowMaximized)
+    };
+
+    /// <summary>
+    /// Puts every setting back to its shipped value, keeping the layout and everything else
+    /// in <see cref="Preserved"/>.
+    ///
+    /// Applied live like any other edit rather than written straight to disk: a reset is a
+    /// large change to look at, and Cancel has to be able to take it back.
+    /// </summary>
+    public void ResetToDefaults()
+    {
+        var shipped = new Scene();
+
+        foreach (var prop in typeof(Scene).GetProperties())
+            if (prop.CanRead && prop.CanWrite && Array.IndexOf(Preserved, prop.Name) < 0)
+                prop.SetValue(this, prop.GetValue(shipped));
+    }
 }

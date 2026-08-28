@@ -79,6 +79,10 @@ public sealed partial class MainWindow : Window
     /// <summary>Width of the settings page, the same with the canvas and without it.</summary>
     const double PageWidth = 440;
     Border _dirtyBar = null!;
+    Border _updateCard = null!;
+    TextBlock _updateText = null!;
+    Button _updateClose = null!;
+    TextBlock _cropStatus = null!;
     Border _fixtureOverlay = null!;
     StackPanel _fixturePanel = null!;
     ListBox _fixtureList = null!;
@@ -142,6 +146,10 @@ public sealed partial class MainWindow : Window
     {
         ProbeLog.Configure(Scene.LogPath, _scene.WriteLog);
 
+        // Настройки читаются раньше, чем известно, куда писать лог, поэтому о неудавшемся
+        // переносе со старого имени файла сообщается здесь.
+        if (Scene.MigrationNote != null) ProbeLog.Log("настройки", Scene.MigrationNote);
+
         // Раньше всего остального: дальше собираются подписи, а они уже переведённые.
         Loc.Configure(System.IO.Path.Combine(Scene.Folder, "lang"));
         Loc.Load(_scene.Language);
@@ -187,6 +195,9 @@ public sealed partial class MainWindow : Window
 
             if (_scene.StartMinimized) WindowState = WindowState.Minimized;
             if (_scene.StartPaintingOnLaunch) StartPainting();
+
+            // Не ожидается: ответ может идти секунды, а подсветке это время нужнее.
+            if (_scene.CheckUpdates) _ = AnnounceUpdateAsync();
         };
 
         StateChanged += (_, _) =>
@@ -281,8 +292,14 @@ public sealed partial class MainWindow : Window
 
         // The canvas switch lives under the sections rather than in them: it is about the
         // shape of the window, not about any one page.
-        _canvasToggle = (CheckBox)Ui.Check(Loc.T("nav.canvas"), _scene.ShowCanvas,
-            v => { _scene.ShowCanvas = v; ApplyCanvasVisibility(); Touch(); });
+        _canvasToggle = (CheckBox)Ui.Check(Loc.T("nav.canvas"), _scene.ShowCanvas, v =>
+        {
+            if (_rebuildingUi) return;
+
+            _scene.ShowCanvas = v;
+            ApplyCanvasVisibility();
+            Touch();
+        });
 
         _canvasToggle.Margin = new Thickness(12, 12, 0, 0);
         DockPanel.SetDock(_canvasToggle, Dock.Bottom);
@@ -298,13 +315,20 @@ public sealed partial class MainWindow : Window
         var page = new Grid { Margin = new Thickness(0, 12, 12, 12) };
         page.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
         page.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        page.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
 
         _pageHost = new ContentControl();
         Grid.SetRow(_pageHost, 0);
         page.Children.Add(_pageHost);
 
+        // A new release is an offer, not a fault, so it stands on a card of its own rather
+        // than in the line that reports a lost connection.
+        _updateCard = BuildUpdateCard();
+        Grid.SetRow(_updateCard, 1);
+        page.Children.Add(_updateCard);
+
         _dirtyBar = BuildDirtyBar();
-        Grid.SetRow(_dirtyBar, 1);
+        Grid.SetRow(_dirtyBar, 2);
         page.Children.Add(_dirtyBar);
 
         Grid.SetColumn(page, 1);
@@ -394,13 +418,54 @@ public sealed partial class MainWindow : Window
     {
         // Under the canvas rather than in the settings: it is a way of looking at the
         // layout, switched on and off while working on it, not something to set once.
-        var toggle = Ui.Check(Loc.T("bar.screen"), _scene.ShowScreen,
-            v => { _scene.ShowScreen = v; ApplyScreenPreview(); Touch(); },
-            Loc.T("bar.screen.note"));
+        var toggle = Ui.Check(Loc.T("bar.screen"), _scene.ShowScreen, v =>
+        {
+            if (_rebuildingUi) return;
+
+            _scene.ShowScreen = v;
+            ApplyScreenPreview();
+            Touch();
+        }, Loc.T("bar.screen.note"));
 
         if (toggle is FrameworkElement box) box.Margin = new Thickness(12, 0, 0, 0);
         DockPanel.SetDock(toggle, Dock.Right);
         return toggle;
+    }
+
+    Border BuildUpdateCard()
+    {
+        _updateText = new TextBlock
+        {
+            Foreground = Ui.Fg,
+            FontSize = Ui.TextSize,
+            VerticalAlignment = VerticalAlignment.Center,
+            TextWrapping = TextWrapping.Wrap
+        };
+
+        // Закрытие живёт одну сессию: проверка идёт при запуске, поэтому следующий холодный
+        // старт покажет карточку снова, пока релиз новее.
+        _updateClose = new Button
+        {
+            Content = new TextBlock { Text = "\uE711", FontFamily = Ui.IconFont, FontSize = 11 },
+            Width = 28,
+            Height = 28,
+            Padding = new Thickness(0),
+            Margin = new Thickness(8, 0, 0, 0),
+            VerticalAlignment = VerticalAlignment.Top,
+            ToolTip = Loc.T("update.hide")
+        };
+        _updateClose.Click += (_, _) => _updateCard.Visibility = Visibility.Collapsed;
+
+        var dock = new DockPanel();
+        DockPanel.SetDock(_updateClose, Dock.Right);
+        dock.Children.Add(_updateClose);
+        dock.Children.Add(_updateText);
+
+        var card = Ui.Card(dock);
+        card.Padding = new Thickness(12);
+        card.Margin = new Thickness(0, 10, 0, 0);
+        card.Visibility = Visibility.Collapsed;
+        return card;
     }
 
     Border BuildDirtyBar()
@@ -504,6 +569,8 @@ public sealed partial class MainWindow : Window
         BuildGeneralSection();
         BuildDevicesSection();
         BuildCaptureSection();
+        BuildCropSection();
+        BuildBrightnessSection();
         BuildColorsSection();
         BuildTestSection();
         BuildPowerSection();
@@ -516,11 +583,34 @@ public sealed partial class MainWindow : Window
         _nav.SelectedIndex = selected;
         _pageHost.Content = _pages[selected];
 
+        RefreshBarToggles();
+
         _rebuildingUi = false;
 
-        // the settings may have arrived from a cancel or an import, not from a checkbox
+        // the settings may have arrived from a cancel, an import or a reset, not from a checkbox
         ApplyScreenPreview();
         ApplyCanvasVisibility();
+    }
+
+    /// <summary>
+    /// Puts the two switches outside the settings pages back in step with the settings.
+    ///
+    /// They stand under the sections and under the canvas rather than on a page, so a
+    /// wholesale rebuild - cancel, import, reset - would otherwise leave them showing what
+    /// was set before it. The screen switch carries its explanation inside itself and is
+    /// replaced whole rather than relabelled.
+    /// </summary>
+    void RefreshBarToggles()
+    {
+        _canvasToggle.IsChecked = _scene.ShowCanvas;
+
+        int at = _bottomBar.Children.IndexOf(_screenToggle);
+        if (at < 0) return;
+
+        _bottomBar.Children.RemoveAt(at);
+        _screenToggle = BuildScreenToggle();
+        _bottomBar.Children.Insert(at, _screenToggle);
+        _screenToggle.Visibility = _scene.ShowCanvas ? Visibility.Visible : Visibility.Collapsed;
     }
 
     void BuildGeneralSection() => AddSection(Loc.T("tab.main"), "\uE713", panel =>
@@ -576,16 +666,20 @@ public sealed partial class MainWindow : Window
 
         panel.Children.Add(Ui.Header(Loc.T("main.settings"),
             Loc.T("main.settings.note")));
-        panel.Children.Add(Ui.Row(Ui.Btn(Loc.T("main.export"), ExportSettings), Ui.Btn(Loc.T("main.import"), ImportSettings)));
+        panel.Children.Add(Ui.Row(
+            Ui.Btn(Loc.T("main.export"), ExportSettings),
+            Ui.Btn(Loc.T("main.import"), ImportSettings),
+            Ui.Btn(Loc.T("main.reset"), ResetSettings),
+            Ui.HelpIcon(Loc.T("main.reset.note"))));
 
-        panel.Children.Add(Ui.Header(Loc.T("main.logs")));
+        panel.Children.Add(Ui.Header(Loc.T("main.logs"), Loc.T("main.logs.note")));
         panel.Children.Add(Ui.Check(Loc.T("main.log"), _scene.WriteLog, v =>
         {
             _scene.WriteLog = v;
             ProbeLog.Configure(Scene.LogPath, v);
             Touch();
         }));
-        panel.Children.Add(Ui.Note(Scene.LogPath));
+        panel.Children.Add(Ui.PathLink(Scene.LogPath));
     });
 
     void BuildDevicesSection()
@@ -683,8 +777,14 @@ public sealed partial class MainWindow : Window
         panel.Children.Add(Ui.Note(string.Format(Loc.T("capture.rect"),
             _scene.Monitor.Width.ToString("F0"), _scene.Monitor.Height.ToString("F0"))));
 
-        panel.Children.Add(Ui.Slider(Loc.T("capture.fps"), _scene.MaxFps, 1, 120, 1, v => { _scene.MaxFps = (int)v; Touch(); }, "",
-            Loc.T("capture.fps.note")));
+        // Верх шкалы — не число, а «без ограничения»: там настройка перестаёт задавать темп,
+        // и остаётся только собственный пол цикла раскраски. Ограничение оплачивается
+        // задержкой, потому что кадр, пришедший раньше срока, отбрасывается, а не придерживается.
+        panel.Children.Add(Ui.Slider(Loc.T("capture.fps"), _scene.MaxFps <= 0 ? FpsFree : _scene.MaxFps,
+            10, FpsFree, 1,
+            v => { _scene.MaxFps = v >= FpsFree ? 0 : (int)v; Touch(); }, "",
+            Loc.T("capture.fps.note"),
+            format: v => v >= FpsFree ? Loc.T("capture.fps.free") : v.ToString("0")));
 
         panel.Children.Add(Ui.Slider(Loc.T("capture.radius"), _scene.SampleRadiusMm, 1, 100, 1,
             v => { _scene.SampleRadiusMm = Math.Max(1, v); ShowSampleArea(); Touch(); }, Loc.T("unit.mm"),
@@ -693,6 +793,79 @@ public sealed partial class MainWindow : Window
         panel.Children.Add(Ui.Header(Loc.T("capture.stats")));
         panel.Children.Add(BuildStats());
     });
+
+    /// <summary>Where the frame-rate slider stops being a limit and becomes «no limit».</summary>
+    const double FpsFree = 145;
+
+    void BuildCropSection() => AddSection(Loc.T("tab.crop"), "\uE123", panel =>
+    {
+        panel.Children.Add(Ui.Note(Loc.T("crop.head")));
+
+        panel.Children.Add(Ui.Check(Loc.T("crop.enable"), _scene.AdaptiveCrop, v =>
+        {
+            if (_rebuildingUi) return;
+
+            _scene.AdaptiveCrop = v;
+            Touch();
+            RebuildSections();          // всё ниже включается и гаснет вместе с ним
+        }, Loc.T("crop.enable.note")));
+
+        _cropStatus = Ui.Note("");
+        panel.Children.Add(_cropStatus);
+        UpdateCropStatus();
+
+        bool on = _scene.AdaptiveCrop;
+
+        panel.Children.Add(Ui.Check(Loc.T("crop.vertical"), _scene.CropVertical,
+            v => { _scene.CropVertical = v; Touch(); }, Loc.T("crop.vertical.note"), enabled: on));
+        panel.Children.Add(Ui.Check(Loc.T("crop.horizontal"), _scene.CropHorizontal,
+            v => { _scene.CropHorizontal = v; Touch(); }, Loc.T("crop.horizontal.note"), enabled: on));
+        panel.Children.Add(Ui.Check(Loc.T("crop.stretch"), _scene.CropStretch,
+            v => { _scene.CropStretch = v; Touch(); }, Loc.T("crop.stretch.note"), enabled: on));
+
+        panel.Children.Add(Ui.Slider(Loc.T("crop.min"), _scene.CropMinPercent, 0, 10, 0.5,
+            v => { _scene.CropMinPercent = v; Touch(); }, "%", Loc.T("crop.min.note"), enabled: on));
+        panel.Children.Add(Ui.Slider(Loc.T("crop.max"), _scene.CropMaxPercent, 5, 40, 1,
+            v => { _scene.CropMaxPercent = v; Touch(); }, "%", Loc.T("crop.max.note"), enabled: on));
+        panel.Children.Add(Ui.Slider(Loc.T("crop.level"), _scene.CropBlackLevel, 0, 48, 1,
+            v => { _scene.CropBlackLevel = (int)v; Touch(); }, "", Loc.T("crop.level.note"), enabled: on));
+        panel.Children.Add(Ui.Slider(Loc.T("crop.overlook"), _scene.CropOverlookPercent, 0, 10, 0.5,
+            v => { _scene.CropOverlookPercent = v; Touch(); }, "%", Loc.T("crop.overlook.note"), enabled: on));
+        panel.Children.Add(Ui.Slider(Loc.T("crop.hold"), _scene.CropHoldMs / 1000.0, 0.1, 3.0, 0.05,
+            v => { _scene.CropHoldMs = v * 1000.0; Touch(); }, Loc.T("unit.s"), Loc.T("crop.hold.note"), enabled: on));
+        panel.Children.Add(Ui.Slider(Loc.T("crop.inset"), _scene.CropInsetPercent, 0, 3, 0.1,
+            v => { _scene.CropInsetPercent = v; Touch(); }, "%", Loc.T("crop.inset.note"),
+            format: v => v <= 0 ? Loc.T("off") : v.ToString("0.0"), enabled: on));
+    });
+
+    /// <summary>
+    /// What the detector sees right now, live.
+    ///
+    /// Without it the settings are guesswork: the numbers only mean something against the
+    /// material actually on screen, and the case alone does not say whether a bar was found
+    /// or merely suspected.
+    /// </summary>
+    void UpdateCropStatus()
+    {
+        if (_cropStatus == null) return;
+
+        if (!_scene.AdaptiveCrop)
+        {
+            _cropStatus.Text = Loc.T("crop.status.off");
+            return;
+        }
+
+        var r = _painter.Crop;
+        bool v = r.Y0 > 0.001, h = r.X0 > 0.001;
+
+        // Целые предложения на каждый случай, а не сборка из кусков: порядок слов в другом
+        // языке другой, и в склейке переводчик его не поменяет.
+        _cropStatus.Text =
+            v && h ? string.Format(Loc.T("crop.status.both"), r.Y0 * 100, r.X0 * 100) :
+            v ? string.Format(Loc.T("crop.status.v"), r.Y0 * 100) :
+            h ? string.Format(Loc.T("crop.status.h"), r.X0 * 100) :
+            Loc.T("crop.status.none");
+    }
 
     /// <summary>
     /// Takes the monitor rectangle from the screen itself.
@@ -813,6 +986,9 @@ public sealed partial class MainWindow : Window
         panel.Children.Add(Ui.Note(Loc.T("about.text2")));
 
         panel.Children.Add(Ui.Note(Loc.T("about.text3")));
+
+        panel.Children.Add(Ui.Check(Loc.T("about.updates"), _scene.CheckUpdates,
+            v => { _scene.CheckUpdates = v; Touch(); }, Loc.T("about.updates.note")));
 
         panel.Children.Add(Ui.Link(Loc.T("about.repo"), "https://github.com/Wa1den/CaseLight"));
         panel.Children.Add(Ui.Link(Loc.T("about.rimlight"), "https://github.com/Wa1den/Rimlight"));
@@ -948,6 +1124,104 @@ public sealed partial class MainWindow : Window
         {
             Say(Loc.P("Не удалось прочитать файл: ", "Could not read the file: ") + ex.Message);
         }
+    }
+
+    /// <summary>
+    /// Puts every setting back to its standard value, leaving the layout alone.
+    ///
+    /// Applied live like any other edit rather than written straight to disk: a reset moves
+    /// several pages at once, and «Отмена» has to be able to take it back. What lives
+    /// outside the settings file goes with it - the autostart entry in the registry and the
+    /// scheduler task, both of which the standard values say are off.
+    /// </summary>
+    void ResetSettings()
+    {
+        if (MessageBox.Show(Loc.T("main.reset.confirm"), Loc.T("main.reset"),
+                            MessageBoxButton.OKCancel, MessageBoxImage.Question) != MessageBoxResult.OK)
+            return;
+
+        _scene.ResetToDefaults();
+
+        ProbeLog.Configure(Scene.LogPath, _scene.WriteLog);
+        if (Autostart.IsEnabled()) Autostart.Set(false);
+
+        // The task is «run as administrator» by another name, so it follows that setting
+        // down exactly as it does when the checkbox is cleared by hand.
+        if (OpenRgbTask.Exists()) OpenRgbTask.Delete();
+
+        RebuildSections();
+        SyncFixtureList();
+        _painter.Invalidate();
+        _view.InvalidateVisual();
+        UpdateDirtyBar();
+
+        Say(Loc.P("Настройки сброшены. Проверьте и нажмите «Применить».",
+                  "Settings reset. Check them and press «Apply»."));
+    }
+
+    // ---- обновления -------------------------------------------------------
+
+    string? _updateUrl;
+    string _updateVersion = "";
+
+    /// <summary>
+    /// Says once, on the way in, that a newer release exists. Silent otherwise - including
+    /// when the check itself failed, which is not news the user asked for.
+    ///
+    /// Started from the dispatcher and never configured away from it, so the continuation
+    /// after the request comes back on the interface thread and can touch the window.
+    /// </summary>
+    async System.Threading.Tasks.Task AnnounceUpdateAsync()
+    {
+        var current = System.Reflection.Assembly.GetExecutingAssembly().GetName().Version
+                      ?? new Version(1, 0, 0);
+
+        var found = await UpdateCheck.FindNewerAsync(current);
+        if (found == null) return;
+
+        _updateUrl = found.Value.Url;
+        _updateVersion = found.Value.Version.ToString(3);
+
+        string text = string.Format(Loc.T("update.available"), _updateVersion);
+        ProbeLog.Log(Loc.P("обновление", "update"), text);
+
+        // With the tray in use the window may not be on screen at all, so the notice also
+        // has to leave the window. The card is shown either way: a balloon that was missed
+        // leaves nothing behind, and the card is what the user comes back to.
+        if (_scene.MinimizeToTray && _tray != null)
+        {
+            _tray.BalloonTipClicked -= OnUpdateBalloonClicked;
+            _tray.BalloonTipClicked += OnUpdateBalloonClicked;
+            _tray.ShowBalloonTip(10000, "CaseLight", text, System.Windows.Forms.ToolTipIcon.Info);
+        }
+
+        ShowUpdateCard();
+    }
+
+    /// <summary>Fills the card in the current language; called again after a language change.</summary>
+    void ShowUpdateCard()
+    {
+        if (_updateUrl == null) return;
+
+        _updateClose.ToolTip = Loc.T("update.hide");
+
+        _updateText.Inlines.Clear();
+        _updateText.Inlines.Add(string.Format(Loc.T("update.available"), _updateVersion) + " ");
+
+        var link = new System.Windows.Documents.Hyperlink(
+            new System.Windows.Documents.Run(Loc.T("update.open")));
+        Ui.StyleLink(link);
+        link.Click += (_, _) => OpenUpdatePage();
+        _updateText.Inlines.Add(link);
+
+        _updateCard.Visibility = Visibility.Visible;
+    }
+
+    void OnUpdateBalloonClicked(object? sender, EventArgs e) => OpenUpdatePage();
+
+    void OpenUpdatePage()
+    {
+        if (_updateUrl != null) Ui.OpenUrl(_updateUrl);
     }
 
     // ---- питание, трей, статус --------------------------------------------
@@ -1113,6 +1387,7 @@ public sealed partial class MainWindow : Window
         }
 
         FollowBusScreen();
+        UpdateCropStatus();
 
         if (_tray != null) _tray.Visible = _scene.MinimizeToTray;
     }
@@ -1339,16 +1614,12 @@ public sealed partial class MainWindow : Window
         _cancelButton.Content = Loc.T("bar.cancel");
         _dirtyText.Text = Loc.T("bar.dirty");
 
-        int at = _bottomBar.Children.IndexOf(_screenToggle);
-        _bottomBar.Children.RemoveAt(at);
-        _screenToggle = BuildScreenToggle();
-        _bottomBar.Children.Insert(at, _screenToggle);
-        _screenToggle.Visibility = _scene.ShowCanvas ? Visibility.Visible : Visibility.Collapsed;
-
         SetupTray();
-        RebuildSections();
+        RebuildSections();          // заодно пересобирает переключатель под холстом
         SyncFixtureList();
         BuildFixturePanel();
+
+        if (_updateCard.Visibility == Visibility.Visible) ShowUpdateCard();
 
         // Ширина рейла меняется вместе с длиной подписей, а от неё считается узкое окно.
         if (!_scene.ShowCanvas)
