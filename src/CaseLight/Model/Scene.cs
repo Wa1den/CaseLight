@@ -129,7 +129,7 @@ public sealed class Scene
     /// held, so the picture waits for the next one. Slow buses are not what this is for -
     /// memory on the SMBus gets a divider of its own in <see cref="Fixture.UpdateEvery"/>.
     /// </summary>
-    public int MaxFps { get; set; } = 30;
+    public int MaxFps { get; set; }
 
     /// <summary>Which screen to capture ourselves. Empty means the primary one.</summary>
     public string MonitorDeviceName { get; set; } = "";
@@ -151,11 +151,11 @@ public sealed class Scene
     /// everything turns into the same brown average. Roughly the size of the lit object
     /// itself works well.
     /// </summary>
-    public double SampleRadiusMm { get; set; } = 60;
+    public double SampleRadiusMm { get; set; } = 20;
 
     public double Brightness { get; set; } = 1.0;
-    public double Gamma { get; set; } = 2.2;
-    public double Saturation { get; set; } = 1.15;
+    public double Gamma { get; set; } = 1.0;
+    public double Saturation { get; set; } = 1.0;
     public double MinLuma { get; set; }
 
     /// <summary>
@@ -180,14 +180,13 @@ public sealed class Scene
     /// Zero switches it off, which is how it behaved before.
     /// </summary>
     public double ShadowNeutral { get; set; }
-    public int TemperatureK { get; set; } = 6500;
+    public int TemperatureK { get; set; } = 5600;
     public double GainR { get; set; } = 1.0;
     public double GainG { get; set; } = 1.0;
     public double GainB { get; set; } = 1.0;
 
-    /// <summary>Light rises quickly and falls gently, as in Rimlight.</summary>
-    public double SmoothingRise { get; set; } = 0.55;
-    public double SmoothingFall { get; set; } = 0.18;
+    public double SmoothingRise { get; set; } = 0.9;
+    public double SmoothingFall { get; set; } = 0.9;
 
     // ---- кадрирование -----------------------------------------------------
 
@@ -340,7 +339,7 @@ public sealed class Scene
     /// In <see cref="WakeRecovery.Nothing"/> it keeps its original meaning, since there
     /// the old server carries on with the handles it had.
     /// </summary>
-    public int ResumeDelayMs { get; set; } = 8000;
+    public int ResumeDelayMs { get; set; } = 2000;
 
     /// <summary>Default is the blunt one, because it is the one that actually works.</summary>
     public WakeRecovery WakeRecovery { get; set; } = WakeRecovery.RestartServer;
