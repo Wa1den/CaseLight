@@ -1185,10 +1185,11 @@ public sealed partial class MainWindow : Window
         string text = string.Format(Loc.T("update.available"), _updateVersion);
         ProbeLog.Log(Loc.P("обновление", "update"), text);
 
-        // With the tray in use the window may not be on screen at all, so the notice also
-        // has to leave the window. The card is shown either way: a balloon that was missed
-        // leaves nothing behind, and the card is what the user comes back to.
-        if (_scene.MinimizeToTray && _tray != null)
+        // Only when the program opened into the tray: then the window is not on screen and
+        // the card has nobody to show itself to. With the window open the card is enough,
+        // and a balloon over it would say the same thing twice. The card is shown either
+        // way - a balloon that was missed leaves nothing behind.
+        if (_scene.StartMinimized && _tray is { Visible: true })
         {
             _tray.BalloonTipClicked -= OnUpdateBalloonClicked;
             _tray.BalloonTipClicked += OnUpdateBalloonClicked;

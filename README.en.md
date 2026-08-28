@@ -75,13 +75,14 @@ extends the lit run by one LED, and the value is taken from the point where the 
 growing.
 
 The sampling radius sets the size of the screen area averaged for one LED; the default is
-60 mm. A smaller value makes the colour change noticeably on small movements in the frame,
+20 mm. A smaller value makes the colour change noticeably on small movements in the frame,
 a larger one averages it to a uniform shade.
 
 ## Frame source
 
 The built-in capture runs DDA and WGC at the same time and takes the freshest frame; GDI is
-enabled if both stop producing frames. The default rate is 30 frames per second.
+enabled if both stop producing frames. The rate is unlimited by default; a ceiling is set in
+the settings when the load on the graphics card has to come down.
 
 The other option is receiving frames from [Rimlight](https://github.com/Wa1den/Rimlight),
 the monitor bias lighting. The screen is then captured once for both programs. Frames are
@@ -93,6 +94,17 @@ Code shared by the two programs (capture, colour pipeline, zone sampling, frame 
 handling) is placed in `src/CaseLight.Core` as a separate copy. There is deliberately no
 dependency on Rimlight: case lighting is meant to work on a machine with no monitor bias
 lighting as well.
+
+## Cropping
+
+Material wider than the screen comes with black bars above and below it, and the LEDs that
+read those places stay dark. Adaptive cropping finds the edges of the picture in the frame
+and moves the sampling inside them; the picture can also be spread across every fixture so
+that no place in the case is left dark. Subtitles and player controls are drawn over the
+bar, so a row is judged by its ends, apart from its centre, and a short lit run inside the
+bar is not taken for an edge. New edges are acted on only once they have held for the set
+time, otherwise a dark scene would be read as a bar. The feature is off by default: it
+changes where every LED reads from.
 
 ## Update rate
 
@@ -129,8 +141,9 @@ device rescan is available instead of a restart, but OpenRGB sometimes crashes d
 ## Files
 
 The layout, the settings and the log are kept in `%AppData%\CaseLight\`. The entire state
-of the program is stored in `scene.json`, and moving it to another machine is a matter of
-exporting and importing that file.
+of the program is stored in `config.json`, and moving it to another machine is a matter of
+exporting and importing that file. Versions before 1.5.0 kept the settings in `scene.json`;
+on the first run they are copied under the new name and the old file is left in place.
 
 ## Localisation
 
