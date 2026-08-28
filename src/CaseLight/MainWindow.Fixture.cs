@@ -347,15 +347,21 @@ public sealed partial class MainWindow
 
     // ---- вкладка цветов и тест размещения ---------------------------------
 
-    void BuildColorsSection() => AddSection(Loc.T("tab.color"), "\uE790", panel =>
+    /// <summary>
+    /// Brightness is kept apart from colour: how much light the case makes is a different
+    /// question from what colour it makes, and these are the settings reached for when the
+    /// room is dark rather than when the light is the wrong shade. The keys keep their
+    /// "color." prefix - renaming them would silently drop the matching lines out of
+    /// anyone's own translation file.
+    /// </summary>
+    void BuildBrightnessSection() => AddSection(Loc.T("tab.brightness"), "\uE706", panel =>
     {
-        panel.Children.Add(Ui.Header(Loc.T("color.head")));
-        panel.Children.Add(Ui.Slider(Loc.T("color.brightness"), _scene.Brightness, 0, 1, 0.01, v => { _scene.Brightness = v; Touch(); }));
-        panel.Children.Add(Ui.Slider(Loc.T("color.saturation"), _scene.Saturation, 0, 3, 0.05, v => { _scene.Saturation = v; Touch(); }));
-        panel.Children.Add(Ui.Slider(Loc.T("color.gamma"), _scene.Gamma, 0.5, 4, 0.05, v => { _scene.Gamma = v; Touch(); }));
-        panel.Children.Add(Ui.Slider(Loc.T("color.temperature"), _scene.TemperatureK, 1500, 15000, 100, v => { _scene.TemperatureK = (int)v; Touch(); }, " K"));
+        panel.Children.Add(Ui.Slider(Loc.T("color.brightness"), _scene.Brightness, 0, 1, 0.01,
+            v => { _scene.Brightness = v; Touch(); }, "",
+            Loc.T("color.brightness.note")));
+
         // Кубическая шкала: рабочие значения лежат около 0,003, и на линейной шкале весь ход
-        // уходит на ту часть диапазона, где лента просто гаснет.
+        // уходит на ту часть диапазона, где подсветка просто гаснет.
         panel.Children.Add(Ui.Slider(Loc.T("color.minluma"), Math.Pow(_scene.MinLuma / 0.3, 1.0 / 3.0), 0, 1, 0.005,
             v => { _scene.MinLuma = Math.Pow(v, 3) * 0.3; Touch(); }, "",
             Loc.T("color.minluma.note"),
@@ -366,6 +372,21 @@ public sealed partial class MainWindow
             v => { _scene.ShadowNeutral = v; Touch(); }, "",
             Loc.T("color.shadow.note"),
             format: v => v <= 0 ? Loc.T("off") : v.ToString("0.##", CultureInfo.InvariantCulture)));
+
+        // Подпись в байтах вывода: доля от единицы глазу ничего не говорит, а 8 из 255 -
+        // это то самое число, которое видно на диоде.
+        panel.Children.Add(Ui.Slider(Loc.T("color.backlight"), _scene.MinBacklight, 0, 0.25, 0.005,
+            v => { _scene.MinBacklight = v; Touch(); }, "",
+            Loc.T("color.backlight.note"),
+            format: v => v <= 0 ? Loc.T("off") : (v * 255).ToString("0", CultureInfo.InvariantCulture)));
+    });
+
+    void BuildColorsSection() => AddSection(Loc.T("tab.color"), "\uE790", panel =>
+    {
+        panel.Children.Add(Ui.Header(Loc.T("color.head")));
+        panel.Children.Add(Ui.Slider(Loc.T("color.saturation"), _scene.Saturation, 0, 3, 0.05, v => { _scene.Saturation = v; Touch(); }));
+        panel.Children.Add(Ui.Slider(Loc.T("color.gamma"), _scene.Gamma, 0.5, 4, 0.05, v => { _scene.Gamma = v; Touch(); }));
+        panel.Children.Add(Ui.Slider(Loc.T("color.temperature"), _scene.TemperatureK, 1500, 15000, 100, v => { _scene.TemperatureK = (int)v; Touch(); }, " K"));
 
         panel.Children.Add(Ui.Header(Loc.T("color.gains"),
             Loc.T("color.gains.note")));
