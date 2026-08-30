@@ -105,6 +105,40 @@ public sealed class CasePainter : IDisposable
     volatile bool _paused;
     string _pauseReason = "";
 
+    /// <summary>
+    /// Held around the colour pass and the write to the devices, so a blackout taken on
+    /// another thread cannot land in the middle of one.
+    ///
+    /// The paint thread checks the pause flag at the top of its cycle and reaches the
+    /// devices some milliseconds later; it was in that gap that a colour frame went out
+    /// after the blackout and left the case lit through a lock or a sleep.
+    /// </summary>
+    readonly object _sendGate = new();
+
+    /// <summary>
+    /// How often the same picture is written again while nothing new is being painted.
+    ///
+    /// Silence is not enough to keep the case as it is: the OpenRGB server dies and is
+    /// restarted often enough, and its devices come back in the mode they ship with.
+    /// </summary>
+    const int KeepAliveMs = 2000;
+
+    /// <summary>When the devices were last written, for the repeat above.</summary>
+    long _lastWriteTicks;
+
+    /// <summary>Holds the last picture instead of following the screen - see <see cref="Freeze"/>.</summary>
+    volatile bool _frozen;
+
+    /// <summary>Set when the frame source went away: the case stays dark until frames return.</summary>
+    volatile bool _sourceLost;
+
+    /// <summary>When the bus last handed over a frame, and when its publisher was last asked about.</summary>
+    long _lastBusFrameTicks;
+    long _lastPublisherCheck;
+
+    /// <summary>How long the bus may stay quiet before the publisher is asked whether it is there.</summary>
+    const int BusSilenceMs = 2000;
+
     /// <summary>Nothing is written to the hardware until this moment passes.</summary>
     long _holdUntilTicks;
 
@@ -258,7 +292,11 @@ public sealed class CasePainter : IDisposable
         _thread.Start();
     }
 
-    public void Stop()
+    /// <param name="blackout">
+    /// False leaves the case as it is. The stop button darkens it; quitting with
+    /// «гасить при выходе» unticked must not.
+    /// </param>
+    public void Stop(bool blackout = true)
     {
         if (!_running) return;
 
@@ -267,18 +305,60 @@ public sealed class CasePainter : IDisposable
         _thread = null;
 
         StopCapture();
-        _hub.Blackout();
+
+        // The thread is gone, so nothing else is writing; the gate is taken anyway because
+        // Pause can still arrive from a power event at this very moment.
+        if (blackout) lock (_sendGate) SendBlackLocked();
+
         _idle = true;
     }
 
     /// <summary>Darkens the case and stops writing - for lock, sleep and display off.</summary>
     public void Pause(string reason)
     {
-        if (_paused) return;
+        lock (_sendGate)
+        {
+            bool already = _paused;
 
-        _pauseReason = reason;
-        _paused = true;
+            // The reason is written down even when the pause is already on: the display
+            // goes off first and the session locks after it, and the status line used to
+            // keep naming the display.
+            _pauseReason = reason;
+            _paused = true;
+
+            if (!already) SendBlackLocked();
+        }
+
+        // Записывается и при смене причины: экран гаснет первым, сессия блокируется следом,
+        // и по журналу видно, что именно держит подсветку тёмной.
+        ProbeLog.Log(Loc.P("раскраска", "painting"), Loc.P("пауза: ", "paused: ") + reason);
+    }
+
+    /// <summary>Writes black and remembers when, so the pause can keep it up.</summary>
+    void SendBlackLocked()
+    {
         _hub.Blackout();
+        _lastWriteTicks = Environment.TickCount64;
+    }
+
+    /// <summary>
+    /// Holds the last picture instead of following the screen.
+    ///
+    /// For a display that is off while the user has asked for the light to stay on: a
+    /// blanked screen keeps handing over frames, and what is in them is black.
+    /// </summary>
+    public void Freeze(bool on)
+    {
+        if (_frozen == on) return;
+
+        lock (_sendGate)
+        {
+            _frozen = on;
+            if (!on) _resetPipeline = true;    // не разгораться из устаревших цветов
+        }
+
+        ProbeLog.Log(Loc.P("раскраска", "painting"),
+                     on ? Loc.P("кадр удержан", "picture held") : Loc.P("кадр отпущен", "picture released"));
     }
 
     /// <summary>
@@ -290,12 +370,17 @@ public sealed class CasePainter : IDisposable
     /// </summary>
     public void Resume(int delayMs = 0)
     {
-        if (!_paused && delayMs <= 0) return;
+        lock (_sendGate)
+        {
+            if (!_paused && delayMs <= 0) return;
 
-        _paused = false;
-        _pauseReason = "";
-        _holdUntilTicks = Environment.TickCount64 + Math.Max(0, delayMs);
-        _resetPipeline = true;            // не разгораться из устаревших цветов
+            _paused = false;
+            _pauseReason = "";
+            _holdUntilTicks = Environment.TickCount64 + Math.Max(0, delayMs);
+            _resetPipeline = true;            // не разгораться из устаревших цветов
+        }
+
+        ProbeLog.Log(Loc.P("раскраска", "painting"), Loc.P("продолжение", "resumed"));
     }
 
     void Loop()
@@ -344,6 +429,7 @@ public sealed class CasePainter : IDisposable
             if (_paused)
             {
                 Status = Loc.P("пауза: ", "pause: ") + _pauseReason;
+                RepeatBlack();
                 Thread.Sleep(200);
                 continue;
             }
@@ -395,6 +481,17 @@ public sealed class CasePainter : IDisposable
                 _hub.BlackoutOthers(_deviceDivider.Keys);
             }
 
+            // Экран погашен, а гасить подсветку не просили. Новые кадры не разбираются,
+            // потому что в них чернота, но последний повторяется: иначе перезапуск сервера
+            // вернул бы устройствам заводской режим.
+            if (_frozen)
+            {
+                Status = Loc.P("кадр удержан: экран выключен", "picture held: display off");
+                RepeatLast();
+                Thread.Sleep(200);
+                continue;
+            }
+
             // Read once at the top of the tick and used for both filters that count real
             // time: the smoothing and the hold behind the crop.
             double now = clock.Elapsed.TotalMilliseconds;
@@ -418,9 +515,6 @@ public sealed class CasePainter : IDisposable
             double dt = now - lastMs;
             lastMs = now;
 
-            _pipeline.Process(_sampled, _output, ColourSettings(), _zones.Length, dt <= 0 ? periodMs : dt);
-            NeutraliseShadows(_scene.ShadowNeutral);
-
             _frameNo++;
 
             _dueNow.Clear();
@@ -428,19 +522,23 @@ public sealed class CasePainter : IDisposable
                 if (divider <= 1 || _frameNo % divider == 0)
                     _dueNow.Add(device);
 
-            if (_dueNow.Count == 0) { pacer.Wait(periodMs); continue; }
+            bool linkLost = false, nothingToWrite;
 
-            _hub.BeginFrame();
-            for (int i = 0; i < _targets.Length; i++)
+            // Один замок на цвет и на запись: пауза приходит из чужого потока, и без него
+            // её чёрный кадр ложился в середину этого, а следом за ним уходил цветной.
+            // Такт цикла выжидается уже без замка, чтобы пауза не ждала целый период.
+            lock (_sendGate)
             {
-                var t = _targets[i];
-                if (!_dueNow.Contains(t.DeviceIndex)) continue;
+                _pipeline.Process(_sampled, _output, ColourSettings(), _zones.Length, dt <= 0 ? periodMs : dt);
+                NeutraliseShadows(_scene.ShadowNeutral);
 
-                int o = i * 3;
-                _hub.ContributeAt(t.DeviceIndex, t.GlobalLed, _output[o], _output[o + 1], _output[o + 2]);
+                nothingToWrite = _paused || _frozen || _dueNow.Count == 0;
+                if (!nothingToWrite) linkLost = !WriteFrameLocked(_dueNow);
             }
 
-            if (!_hub.EndFrame(_dueNow))
+            if (nothingToWrite) { pacer.Wait(periodMs); continue; }
+
+            if (linkLost)
             {
                 // The OpenRGB server dies on its own often enough that this is an expected
                 // state; reconnecting re-resolves every binding and restores direct mode.
@@ -463,6 +561,88 @@ public sealed class CasePainter : IDisposable
 
             pacer.Wait(periodMs);
         }
+    }
+
+    /// <summary>
+    /// Puts <see cref="_output"/> on the devices named. The caller holds
+    /// <see cref="_sendGate"/>.
+    /// </summary>
+    bool WriteFrameLocked(IReadOnlyCollection<int> devices)
+    {
+        _hub.BeginFrame();
+
+        for (int i = 0; i < _targets.Length; i++)
+        {
+            var t = _targets[i];
+            if (!devices.Contains(t.DeviceIndex)) continue;
+
+            int o = i * 3;
+            _hub.ContributeAt(t.DeviceIndex, t.GlobalLed, _output[o], _output[o + 1], _output[o + 2]);
+        }
+
+        bool sent = _hub.EndFrame(devices);
+        if (sent) _lastWriteTicks = Environment.TickCount64;
+        return sent;
+    }
+
+    /// <summary>Keeps the case dark while the painting is paused or its source is gone.</summary>
+    void RepeatBlack()
+    {
+        lock (_sendGate)
+            if (Environment.TickCount64 - _lastWriteTicks >= KeepAliveMs)
+                SendBlackLocked();
+    }
+
+    /// <summary>Writes the held picture again, so a restarted server cannot show its own.</summary>
+    void RepeatLast()
+    {
+        lock (_sendGate)
+        {
+            if (_output.Length == 0 || Environment.TickCount64 - _lastWriteTicks < KeepAliveMs) return;
+
+            // Все устройства разом: делители расставляют очередь между кадрами, а здесь
+            // кадр один и тот же.
+            WriteFrameLocked(_deviceDivider.Keys);
+        }
+    }
+
+    /// <summary>
+    /// Darkens the case because there is nothing to paint from, and keeps it dark.
+    ///
+    /// The lighting used to freeze on the last picture instead: closing Rimlight leaves the
+    /// shared mapping behind, and the case went on showing the colours of whatever had been
+    /// on screen at that moment.
+    /// </summary>
+    void SourceGone(string status)
+    {
+        Status = status;
+
+        lock (_sendGate)
+        {
+            if (!_sourceLost)
+            {
+                _sourceLost = true;
+                SendBlackLocked();
+                ProbeLog.Log(Loc.P("раскраска", "painting"),
+                             Loc.P("источник кадров пропал, подсветка погашена",
+                                   "the frame source is gone, the lighting is off"));
+                return;
+            }
+        }
+
+        RepeatBlack();
+    }
+
+    /// <summary>Called on every frame that arrives, to let the painting come back.</summary>
+    void SourceBack()
+    {
+        if (!_sourceLost) return;
+
+        _sourceLost = false;
+        _resetPipeline = true;    // не разгораться из цветов, которые были до пропажи
+
+        ProbeLog.Log(Loc.P("раскраска", "painting"),
+                     Loc.P("источник кадров вернулся", "the frame source is back"));
     }
 
     /// <summary>Пауза заданной длины, точная в отличие от Thread.Sleep.</summary>
@@ -603,19 +783,36 @@ public sealed class CasePainter : IDisposable
     {
         if (!_bus.TryAttach())
         {
-            Status = Loc.P("ожидание кадров: ", "waiting for frames: ") + _bus.Status;
             SourceInfo = Loc.P("нет источника", "no source");
+
+            // Шины нет вовсе: показывать нечего, и держать на корпусе последний кадр
+            // означало бы светить тем, что было на экране когда-то давно.
+            if (Environment.TickCount64 - _lastBusFrameTicks > BusSilenceMs)
+                SourceGone(Loc.P("Rimlight не отдаёт кадры, подсветка погашена.",
+                                 "Rimlight is not sending frames, the lighting is off."));
+            else
+                Status = Loc.P("ожидание кадров: ", "waiting for frames: ") + _bus.Status;
+
             Thread.Sleep(200);
             return false;
         }
 
         if (!_bus.TryRead(ref _image, out var info))
         {
-            // No new frame is normal - a still screen produces none at all. The LEDs keep
-            // whatever they had rather than blinking off.
+            // No new frame is normal, because a still screen produces none at all, so
+            // silence is not enough to act on. The publisher being gone is another matter:
+            // mapping outlives it, and the case would keep the colours of the last picture
+            // for as long as it stayed attached.
+            if (PublisherGone())
+                SourceGone(Loc.P("Rimlight не отдаёт кадры, подсветка погашена.",
+                                 "Rimlight is not sending frames, the lighting is off."));
+
             Pace(periodMs);
             return false;
         }
+
+        _lastBusFrameTicks = Environment.TickCount64;
+        SourceBack();
 
         FramesReceived++;
         LastFrameAgeMs = info.AgeMs;
@@ -625,6 +822,24 @@ public sealed class CasePainter : IDisposable
         SampleFrame(info.Width, info.Height, info.Stride, periodMs, nowMs);
         KeepPreview(info.Width, info.Height, info.Stride);
         return true;
+    }
+
+    /// <summary>
+    /// Whether the publisher behind the bus has gone, asked at most once a second and only
+    /// after the bus has been quiet for a while.
+    ///
+    /// Not free: it comes down to looking up a process by id, and the answer changes about
+    /// as often as Rimlight is started and closed.
+    /// </summary>
+    bool PublisherGone()
+    {
+        long now = Environment.TickCount64;
+
+        if (now - _lastBusFrameTicks < BusSilenceMs) return false;
+        if (now - _lastPublisherCheck < 1000) return _sourceLost;
+
+        _lastPublisherCheck = now;
+        return !_bus.PublisherRunning;
     }
 
     /// <summary>

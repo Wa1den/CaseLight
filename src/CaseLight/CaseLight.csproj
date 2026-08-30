@@ -19,7 +19,7 @@
     <!-- ThemeMode (Fluent) is still marked experimental in .NET 9 -->
     <NoWarn>$(NoWarn);WPF0001</NoWarn>
 
-    <Version>1.5.0</Version>
+    <Version>1.5.1</Version>
     <Product>CaseLight</Product>
     <Authors>Wa1den</Authors>
     <Description>Подсветка корпуса как продолжение экрана, через OpenRGB</Description>
