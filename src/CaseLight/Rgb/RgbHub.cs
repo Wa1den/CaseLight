@@ -462,11 +462,48 @@ public sealed class RgbHub : IDisposable
         EndFrame();
     }
 
-    public void Blackout()
+    /// <summary>
+    /// Writes black to every device, without going through the frame buffers.
+    ///
+    /// It used to be <c>BeginFrame(); EndFrame();</c>, and that is called from the interface
+    /// thread while the paint thread is filling those very buffers: the clearing pass wiped
+    /// half a frame out from under it, and the dictionary itself was being rewritten while
+    /// the other thread read it. Composing the black frame here touches nothing shared.
+    /// </summary>
+    public bool Blackout()
     {
-        BeginFrame();
-        EndFrame();
+        try
+        {
+            lock (_io)
+            {
+                if (_client == null) return false;
+
+                foreach (var info in Devices)
+                {
+                    var colors = new Color[info.LedCount];
+                    for (int i = 0; i < colors.Length; i++) colors[i] = new Color(0, 0, 0);
+
+                    _client.UpdateLeds(info.Index, colors);
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Report(State.Lost, ex.Message);
+            return false;
+        }
+
+        return true;
     }
+
+    /// <summary>
+    /// Waits out the way from our socket to the hardware.
+    ///
+    /// A write returns once the bytes are in the socket; the server has still to pass them
+    /// over USB. Closing the connection or letting the machine sleep in that moment drops
+    /// the frame, and for a blackout there is no next frame to correct it.
+    /// </summary>
+    public static void Settle(int ms = 200) => System.Threading.Thread.Sleep(ms);
 
     /// <summary>
     /// Writes black to every device no fixture drives.

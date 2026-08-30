@@ -196,6 +196,11 @@ public sealed partial class MainWindow : Window
             if (_scene.StartMinimized) WindowState = WindowState.Minimized;
             if (_scene.StartPaintingOnLaunch) StartPainting();
 
+            // Подписка на питание экрана отдаёт его состояние сразу, блокировка сессии
+            // прочитана в конструкторе надзора, но события ни то, ни другое не рождает:
+            // запуск в заблокированной сессии иначе начинался бы с раскраски.
+            ApplyPowerState(_power.State);
+
             // Не ожидается: ответ может идти секунды, а подсветке это время нужнее.
             if (_scene.CheckUpdates) _ = AnnounceUpdateAsync();
         };
@@ -231,7 +236,17 @@ public sealed partial class MainWindow : Window
 
             SaveWindowGeometry();
 
-            if (_scene.OffOnExit) _hub.Blackout();
+            // Порядок важен: пока поток раскраски жив, его очередной кадр уходит следом за
+            // гашением и корпус остаётся светиться. Само гашение здесь, а не в Stop, потому
+            // что при снятой галке подсветка должна остаться гореть - и после теста
+            // размещения, когда раскраска и не запускалась.
+            _painter.Stop(blackout: false);
+
+            if (_scene.OffOnExit)
+            {
+                _hub.Blackout();
+                RgbHub.Settle();
+            }
 
             // Geometry is not something the user is editing, so it persists on its own -
             // written onto the last applied state so pending edits stay discarded.
@@ -1227,38 +1242,51 @@ public sealed partial class MainWindow : Window
 
     // ---- питание, трей, статус --------------------------------------------
 
-    void HookPower()
+    void HookPower() => _power.Changed += (_, state) => ApplyPowerState(state);
+
+    /// <summary>
+    /// Works out what the state of the machine means for the painting.
+    ///
+    /// The watcher only reports; which of these states counts as «никто не смотрит» is a
+    /// matter of this program's settings, so the answer belongs here.
+    /// </summary>
+    void ApplyPowerState(PowerState state)
     {
-        _power.Changed += (_, state) =>
+        string? reason =
+            state.Suspended && _scene.OffOnSuspend ? Loc.P("сон", "sleep") :
+            state.Locked && _scene.OffOnLock ? Loc.P("блокировка", "locked") :
+            state.DisplayOff && _scene.OffOnDisplayOff ? Loc.P("экран выключен", "display off") :
+            null;
+
+        if (state.Suspended) _wokeUp = false;
+
+        // Экран погашен, а гасить подсветку не просили: захват отдаёт кадры и дальше, но в
+        // них чернота, и корпус гас помимо настройки. Держим последний кадр.
+        _painter.Freeze(state.DisplayOff && !_scene.OffOnDisplayOff);
+
+        if (reason != null)
         {
-            string? reason =
-                state.Suspended && _scene.OffOnSuspend ? Loc.P("сон", "sleep") :
-                state.Locked && _scene.OffOnLock ? Loc.P("блокировка", "locked") :
-                state.DisplayOff && _scene.OffOnDisplayOff ? Loc.P("экран выключен", "display off") :
-                null;
+            _painter.Pause(reason);
 
-            if (state.Suspended) _wokeUp = false;
+            // Запись возвращается, когда байты легли в сокет, а сервер отдаёт их по USB
+            // позже; машина же засыпает сразу после возврата из обработчика.
+            if (state.Suspended) RgbHub.Settle();
+            return;
+        }
 
-            if (reason != null)
-            {
-                _painter.Pause(reason);
-                return;
-            }
+        // Only a real wake needs the server shaken; unlocking the session does not.
+        if (state is { Suspended: false } && _power.LastResumeTicks > 0 && !_wokeUp)
+        {
+            _wokeUp = true;
+            RecoverAfterWake();
+            return;
+        }
 
-            // Only a real wake needs the server shaken; unlocking the session does not.
-            if (state is { Suspended: false } && _power.LastResumeTicks > 0 && !_wokeUp)
-            {
-                _wokeUp = true;
-                RecoverAfterWake();
-                return;
-            }
-
-            // No delay here. The pause before the first write is there because the buses
-            // are still settling after a wake, and waking is handled above; this branch is
-            // an unlock, a screen coming back, or the very first notification at startup.
-            // Holding those for eight seconds only left the case dark for no reason.
-            _painter.Resume(0);
-        };
+        // No delay here. The pause before the first write is there because the buses
+        // are still settling after a wake, and waking is handled above; this branch is
+        // an unlock, a screen coming back, or the very first notification at startup.
+        // Holding those for eight seconds only left the case dark for no reason.
+        _painter.Resume(0);
     }
 
     /// <summary>
