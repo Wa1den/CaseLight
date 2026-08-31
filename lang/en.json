@@ -73,6 +73,10 @@
   "capture.fps": "Maximum frames per second",
   "capture.fps.free": "no limit",
   "capture.fps.note": "Limits how often frames are reduced to zone colours, and with that the load on the graphics card. With no limit the frames go through as fast as they arrive. The limit is paid for in latency: a frame that comes in early is dropped and the colour waits for the next one. Slow devices get a divider of their own in the fixture parameters.",
+  "capture.sharpness": "Blur and sharpness",
+  "capture.sharpness.note": "To the left the frame is defocused before the zone colours are read off it: every point is spread into a circle, the way a lens out of focus does it. An LED takes its colour from the neighbourhood of its sampling area while that area stays as it is, so neighbouring lights run into each other. To the right the frame is sharpened instead: neighbouring zones are pushed apart in brightness, and a light patch beside a dark one reads stronger. Both halves are visible on the canvas while the screen is shown.",
+  "capture.blur": "blur {0}%",
+  "capture.sharp": "sharpness {0}%",
   "capture.radius": "Sampling area",
   "capture.radius.note": "The size of the screen patch averaged for one LED. A small value makes the colour follow any movement in the frame, a large one averages it into an even tint.",
   "capture.stats": "Statistics",
@@ -206,5 +210,5 @@
   "unit.s": " s",
   "off": "off",
   "_name": "English",
-  "_version": "3"
+  "_version": "5"
 }
