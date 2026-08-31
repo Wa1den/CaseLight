@@ -63,6 +63,7 @@ public sealed class CasePainter : IDisposable
     readonly FrameSubscriber _bus = new();
     readonly ColorPipeline _pipeline = new();
     readonly CropDetector _crop = new();
+    readonly FrameFilter _filter = new();
 
     /// <summary>Our own capture, used when the frames do not come from Rimlight.</summary>
     HybridBackend? _capture;
@@ -871,6 +872,10 @@ public sealed class CasePainter : IDisposable
                              dt <= 0 || dt > 1000 ? periodMs : dt))
                 RemapZones();
         }
+
+        // По кадру и до выборки: расфокус тем и отличается от более широкой зоны, что зона
+        // остаётся на месте, а холст показывает ровно ту картинку, с которой берутся цвета.
+        _filter.Apply(_scene.Sharpness, _image, width, height, stride);
 
         ZoneSampler.Sample(_image, width, height, stride, _sampleZones, _sampled);
     }

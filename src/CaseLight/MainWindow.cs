@@ -805,9 +805,25 @@ public sealed partial class MainWindow : Window
             v => { _scene.SampleRadiusMm = Math.Max(1, v); ShowSampleArea(); Touch(); }, Loc.T("unit.mm"),
             Loc.T("capture.radius.note")));
 
+        // Один ползунок на две противоположные вещи, ноль посередине: включить обе сразу
+        // нельзя, потому что вторая отменяла бы первую. Шкала целая, в процентах: дробный
+        // шаг от -1 не попадает в ноль ровно, и выключенное состояние оказывалось
+        // недостижимым.
+        panel.Children.Add(Ui.Slider(Loc.T("capture.sharpness"), _scene.Sharpness,
+            -FrameFilter.MaxPercent, FrameFilter.MaxPercent, 1,
+            v => { _scene.Sharpness = (int)Math.Round(v); Touch(); }, "",
+            Loc.T("capture.sharpness.note"),
+            format: DescribeSharpness));
+
         panel.Children.Add(Ui.Header(Loc.T("capture.stats")));
         panel.Children.Add(BuildStats());
     });
+
+    /// <summary>Each half of the scale says which of the two is running and how far.</summary>
+    static string DescribeSharpness(double v) =>
+        v <= -1 ? string.Format(Loc.T("capture.blur"), (int)Math.Round(-v)) :
+        v >= 1 ? string.Format(Loc.T("capture.sharp"), (int)Math.Round(v)) :
+        Loc.T("off");
 
     /// <summary>Where the frame-rate slider stops being a limit and becomes «no limit».</summary>
     const double FpsFree = 145;

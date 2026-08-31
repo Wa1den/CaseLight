@@ -20,7 +20,7 @@ public static class Loc
     /// silently shadowed newly reworded labels, so a mismatched version rewrites it. Only
     /// the two built-in files are rewritten; added languages are left alone.
     /// </summary>
-    const string Version = "3";
+    const string Version = "6";
 
     /// <summary>
     /// Bookkeeping entries rather than translated text: the version a file was written
@@ -316,6 +316,10 @@ public static class Loc
         ["capture.fps"] = "Максимум кадров в секунду",
         ["capture.fps.free"] = "без ограничения",
         ["capture.fps.note"] = "Ограничивает частоту, с которой кадры сводятся к цветам зон, и вместе с ней нагрузку на видеокарту. Без ограничения кадры идут с той частотой, с какой приходят. Ограничение оплачивается задержкой: кадр, пришедший раньше срока, отбрасывается, и цвет ждёт следующего. Медленным устройствам задаётся свой делитель в параметрах фигуры.",
+        ["capture.sharpness"] = "Размытие и резкость",
+        ["capture.sharpness.note"] = "Влево кадр расфокусируется до выборки: диод берёт цвет с окрестности своей зоны, не расширяя её, и соседние светильники переливаются друг в друга. Вправо соседние зоны расходятся по яркости, и светлое рядом с тёмным светит заметнее.",
+        ["capture.blur"] = "размытие {0} %",
+        ["capture.sharp"] = "резкость {0} %",
         ["capture.radius"] = "Область выборки",
         ["capture.radius.note"] = "Размер участка экрана, усредняемого для одного диода. При малом значении цвет меняется от любого движения в кадре, при большом усредняется до однородного оттенка.",
         ["capture.stats"] = "Статистика",
@@ -542,6 +546,10 @@ public static class Loc
         ["capture.fps"] = "Maximum frames per second",
         ["capture.fps.free"] = "no limit",
         ["capture.fps.note"] = "Limits how often frames are reduced to zone colours, and with that the load on the graphics card. With no limit the frames go through as fast as they arrive. The limit is paid for in latency: a frame that comes in early is dropped and the colour waits for the next one. Slow devices get a divider of their own in the fixture parameters.",
+        ["capture.sharpness"] = "Blur and sharpness",
+        ["capture.sharpness.note"] = "To the left the frame is defocused before sampling: an LED takes its colour from around its zone without that zone growing, and neighbouring lights run into each other. To the right neighbouring zones are pushed apart in brightness, so a light patch beside a dark one reads stronger.",
+        ["capture.blur"] = "blur {0}%",
+        ["capture.sharp"] = "sharpness {0}%",
         ["capture.radius"] = "Sampling area",
         ["capture.radius.note"] = "The size of the screen patch averaged for one LED. A small value makes the colour follow any movement in the frame, a large one averages it into an even tint.",
         ["capture.stats"] = "Statistics",

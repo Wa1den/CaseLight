@@ -153,6 +153,17 @@ public sealed class Scene
     /// </summary>
     public double SampleRadiusMm { get; set; } = 20;
 
+    /// <summary>
+    /// How the frame is worked over before the zones are read, in percent from -50 to 50.
+    /// Zero takes the picture as captured.
+    ///
+    /// Below zero it is defocused: an LED then draws its colour from the neighbourhood
+    /// around its sampling area without that area growing, and neighbouring lights run into
+    /// each other. Above zero it is sharpened: neighbouring zones are pushed apart, so a
+    /// light patch beside a dark one reads brighter. See <see cref="FrameFilter"/>.
+    /// </summary>
+    public int Sharpness { get; set; }
+
     public double Brightness { get; set; } = 1.0;
     public double Gamma { get; set; } = 1.0;
     public double Saturation { get; set; } = 1.0;
