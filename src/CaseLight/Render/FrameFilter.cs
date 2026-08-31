@@ -109,21 +109,42 @@ public sealed class FrameFilter
                 int o = row + x * 4;
                 int first = 0, second = 0, third = 0;
 
+                // Дальше radius от боковых краёв ни одна строка диска за кадр не выходит,
+                // и разбор со столбцами за краем не нужен.
+                bool whole = x >= radius && x + radius < width;
+
                 // Три канала считаются вместе: строка диска, её начало и конец у них общие,
                 // и вычислять эти три числа трижды - тратить на них больше, чем на сумму.
                 for (int i = 0; i < _span.Length; i++)
                 {
                     int half = _span[i];
-                    int from = Edge(x - half, width);
-                    int to = Edge(x + half, width) + 1;
-
                     int at = Edge(y + i - radius, height) * 3 * line;
 
-                    first += _rowSums[at + to] - _rowSums[at + from];
-                    at += line;
-                    second += _rowSums[at + to] - _rowSums[at + from];
-                    at += line;
-                    third += _rowSums[at + to] - _rowSums[at + from];
+                    if (whole)
+                    {
+                        int from = x - half;
+                        int to = x + half + 1;
+
+                        first += _rowSums[at + to] - _rowSums[at + from];
+                        at += line;
+                        second += _rowSums[at + to] - _rowSums[at + from];
+                        at += line;
+                        third += _rowSums[at + to] - _rowSums[at + from];
+                    }
+                    else
+                    {
+                        int lo = x - half, hi = x + half;
+                        int miss = lo < 0 ? -lo : 0;
+                        int over = hi >= width ? hi - width + 1 : 0;
+                        int from = lo < 0 ? 0 : lo;
+                        int to = (hi >= width ? width - 1 : hi) + 1;
+
+                        first += Edged(at, from, to, miss, over, width);
+                        at += line;
+                        second += Edged(at, from, to, miss, over, width);
+                        at += line;
+                        third += Edged(at, from, to, miss, over, width);
+                    }
                 }
 
                 dst[o] = (byte)(first / _spanArea);
@@ -133,6 +154,20 @@ public sealed class FrameFilter
             }
         }
     }
+
+    /// <summary>
+    /// One row of the disc where it hangs over the side of the frame, with the columns
+    /// outside counted as copies of the edge column.
+    ///
+    /// The sums alone give the row cut short, and a short row still divided by the area of
+    /// the whole disc came back darkened: at a radius of five pixels the outermost column
+    /// of a flat grey frame lost 43%, and those columns are what the side LEDs read. Rows
+    /// above and below the frame already work this way, by clamping the row index.
+    /// </summary>
+    int Edged(int at, int from, int to, int miss, int over, int width) =>
+        _rowSums[at + to] - _rowSums[at + from] +
+        miss * _rowSums[at + 1] +                                        // _rowSums[at] = 0
+        over * (_rowSums[at + width] - _rowSums[at + width - 1]);
 
     /// <summary>
     /// Pushes the frame away from its own blurred copy: the plain unsharp mask.
@@ -207,7 +242,7 @@ public sealed class FrameFilter
     }
 
     /// <summary>
-    /// The nearest row or column inside the frame.
+    /// The nearest row inside the frame.
     ///
     /// Clamping rather than wrapping: the disc at the top of the picture is filled with more
     /// of the top, where wrapping would pull the bottom edge into it.
