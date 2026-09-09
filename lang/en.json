@@ -10,6 +10,7 @@
   "bar.cancel": "Cancel",
   "bar.dirty": "There are unsaved changes",
   "tab.main": "General",
+  "tab.openrgb": "OpenRGB",
   "tab.devices": "Devices",
   "tab.capture": "Capture",
   "tab.crop": "Cropping",
@@ -26,7 +27,7 @@
   "main.autostart": "Start with Windows",
   "main.autostart.note": "The lighting is driven by OpenRGB, so starting CaseLight automatically only makes sense together with starting OpenRGB.",
   "main.autopaint": "Start painting at once",
-  "main.server": "OpenRGB server",
+  "openrgb.start": "Starting the server",
   "main.serverstart": "Start OpenRGB if it is not running",
   "main.serverstart.note": "The server is started with --server --startminimized: the first opens port 6742, the second hides the window.",
   "main.admin": "Run as administrator, with a prompt",
@@ -210,5 +211,5 @@
   "unit.s": " s",
   "off": "off",
   "_name": "English",
-  "_version": "6"
+  "_version": "7"
 }

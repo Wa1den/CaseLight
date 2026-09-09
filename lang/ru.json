@@ -10,6 +10,7 @@
   "bar.cancel": "Отмена",
   "bar.dirty": "Есть несохранённые изменения",
   "tab.main": "Основное",
+  "tab.openrgb": "OpenRGB",
   "tab.devices": "Устройства",
   "tab.capture": "Захват",
   "tab.crop": "Кадрирование",
@@ -26,7 +27,7 @@
   "main.autostart": "Запускать вместе с Windows",
   "main.autostart.note": "Подсветкой управляет OpenRGB, поэтому автозапуск CaseLight имеет смысл только вместе с автозапуском OpenRGB.",
   "main.autopaint": "Сразу начинать раскраску",
-  "main.server": "Сервер OpenRGB",
+  "openrgb.start": "Запуск сервера",
   "main.serverstart": "Запускать OpenRGB, если он не запущен",
   "main.serverstart.note": "Сервер запускается с ключами --server --startminimized: первый открывает порт 6742, второй убирает окно.",
   "main.admin": "Запускать от администратора с запросом",
@@ -210,5 +211,5 @@
   "unit.s": " с",
   "off": "выключено",
   "_name": "Русский",
-  "_version": "6"
+  "_version": "7"
 }

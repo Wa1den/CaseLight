@@ -582,6 +582,7 @@ public sealed partial class MainWindow : Window
         _pages.Clear();
 
         BuildGeneralSection();
+        BuildOpenRgbSection();
         BuildDevicesSection();
         BuildCaptureSection();
         BuildCropSection();
@@ -653,7 +654,35 @@ public sealed partial class MainWindow : Window
             Loc.T("main.autostart.note")));
         panel.Children.Add(Ui.Check(Loc.T("main.autopaint"), _scene.StartPaintingOnLaunch, v => { _scene.StartPaintingOnLaunch = v; Touch(); }));
 
-        panel.Children.Add(Ui.Header(Loc.T("main.server")));
+        panel.Children.Add(Ui.Header(Loc.T("main.settings"),
+            Loc.T("main.settings.note")));
+        panel.Children.Add(Ui.Row(
+            Ui.Btn(Loc.T("main.export"), ExportSettings),
+            Ui.Btn(Loc.T("main.import"), ImportSettings),
+            Ui.Btn(Loc.T("main.reset"), ResetSettings),
+            Ui.HelpIcon(Loc.T("main.reset.note"))));
+
+        panel.Children.Add(Ui.Header(Loc.T("main.logs"), Loc.T("main.logs.note")));
+        panel.Children.Add(Ui.Check(Loc.T("main.log"), _scene.WriteLog, v =>
+        {
+            _scene.WriteLog = v;
+            ProbeLog.Configure(Scene.LogPath, v);
+            Touch();
+        }));
+        panel.Children.Add(Ui.PathLink(Scene.LogPath));
+    });
+
+    /// <summary>
+    /// Everything about the server the lighting is driven through, including what to do
+    /// with it after a wake.
+    ///
+    /// A section of its own because these settings are about a neighbouring program rather
+    /// than about this one, and in «Основное» they took up more room than everything else
+    /// there together.
+    /// </summary>
+    void BuildOpenRgbSection() => AddSection(Loc.T("tab.openrgb"), "\uE968", panel =>
+    {
+        panel.Children.Add(Ui.Header(Loc.T("openrgb.start")));
         panel.Children.Add(Ui.Check(Loc.T("main.serverstart"), _scene.AutoStartOpenRgb, v => { _scene.AutoStartOpenRgb = v; Touch(); },
             Loc.T("main.serverstart.note")));
         panel.Children.Add(Ui.Check(Loc.T("main.admin"), _scene.OpenRgbAsAdmin, SetRunAsAdmin,
@@ -679,22 +708,26 @@ public sealed partial class MainWindow : Window
             string.IsNullOrWhiteSpace(_scene.OpenRgbPath) ? null : _scene.OpenRgbPath, _scene.OpenRgbAsAdmin))),
             Ui.Btn(Loc.T("main.reconnect"), ConnectHub)));
 
-        panel.Children.Add(Ui.Header(Loc.T("main.settings"),
-            Loc.T("main.settings.note")));
-        panel.Children.Add(Ui.Row(
-            Ui.Btn(Loc.T("main.export"), ExportSettings),
-            Ui.Btn(Loc.T("main.import"), ImportSettings),
-            Ui.Btn(Loc.T("main.reset"), ResetSettings),
-            Ui.HelpIcon(Loc.T("main.reset.note"))));
+        panel.Children.Add(Ui.Header(Loc.T("power.wake")));
 
-        panel.Children.Add(Ui.Header(Loc.T("main.logs"), Loc.T("main.logs.note")));
-        panel.Children.Add(Ui.Check(Loc.T("main.log"), _scene.WriteLog, v =>
+        var wakeBox = new ComboBox { Margin = new Thickness(0, 2, 0, 8) };
+        wakeBox.Items.Add(Loc.T("power.wake.nothing"));
+        wakeBox.Items.Add(Loc.T("power.wake.restart"));
+        wakeBox.SelectedIndex = Math.Max(0, Array.IndexOf(WakeModes, WakeMode));
+        wakeBox.SelectionChanged += (_, _) =>
         {
-            _scene.WriteLog = v;
-            ProbeLog.Configure(Scene.LogPath, v);
+            if (wakeBox.SelectedIndex < 0) return;
+            _scene.WakeRecovery = WakeModes[wakeBox.SelectedIndex];
             Touch();
-        }));
-        panel.Children.Add(Ui.PathLink(Scene.LogPath));
+        };
+        panel.Children.Add(Ui.Labeled(Loc.T("power.wake.what"), wakeBox,
+            Loc.T("power.wake.note")));
+
+        panel.Children.Add(Ui.Row(Ui.Btn(Loc.T("power.restartnow"), RestartServerNow)));
+
+        panel.Children.Add(Ui.Slider(Loc.T("power.delay"), _scene.ResumeDelayMs / 1000.0, 0, 30, 1,
+            v => { _scene.ResumeDelayMs = (int)(v * 1000); Touch(); }, Loc.T("unit.s"),
+            Loc.T("power.delay.note")));
     });
 
     void BuildDevicesSection()
@@ -975,27 +1008,6 @@ public sealed partial class MainWindow : Window
         panel.Children.Add(Ui.Check(Loc.T("power.off.display"), _scene.OffOnDisplayOff, v => { _scene.OffOnDisplayOff = v; Touch(); }));
         panel.Children.Add(Ui.Check(Loc.T("power.off.lock"), _scene.OffOnLock, v => { _scene.OffOnLock = v; Touch(); }));
         panel.Children.Add(Ui.Check(Loc.T("power.off.sleep"), _scene.OffOnSuspend, v => { _scene.OffOnSuspend = v; Touch(); }));
-
-        panel.Children.Add(Ui.Header(Loc.T("power.wake")));
-
-        var wakeBox = new ComboBox { Margin = new Thickness(0, 2, 0, 8) };
-        wakeBox.Items.Add(Loc.T("power.wake.nothing"));
-        wakeBox.Items.Add(Loc.T("power.wake.restart"));
-        wakeBox.SelectedIndex = Math.Max(0, Array.IndexOf(WakeModes, WakeMode));
-        wakeBox.SelectionChanged += (_, _) =>
-        {
-            if (wakeBox.SelectedIndex < 0) return;
-            _scene.WakeRecovery = WakeModes[wakeBox.SelectedIndex];
-            Touch();
-        };
-        panel.Children.Add(Ui.Labeled(Loc.T("power.wake.what"), wakeBox,
-            Loc.T("power.wake.note")));
-
-        panel.Children.Add(Ui.Row(Ui.Btn(Loc.T("power.restartnow"), RestartServerNow)));
-
-        panel.Children.Add(Ui.Slider(Loc.T("power.delay"), _scene.ResumeDelayMs / 1000.0, 0, 30, 1,
-            v => { _scene.ResumeDelayMs = (int)(v * 1000); Touch(); }, Loc.T("unit.s"),
-            Loc.T("power.delay.note")));
     });
 
     /// <summary>

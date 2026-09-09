@@ -20,7 +20,7 @@ public static class Loc
     /// silently shadowed newly reworded labels, so a mismatched version rewrites it. Only
     /// the two built-in files are rewritten; added languages are left alone.
     /// </summary>
-    const string Version = "6";
+    const string Version = "7";
 
     /// <summary>
     /// Bookkeeping entries rather than translated text: the version a file was written
@@ -250,6 +250,7 @@ public static class Loc
         ["bar.dirty"] = "Есть несохранённые изменения",
 
         ["tab.main"] = "Основное",
+        ["tab.openrgb"] = "OpenRGB",
         ["tab.devices"] = "Устройства",
         ["tab.capture"] = "Захват",
         ["tab.crop"] = "Кадрирование",
@@ -267,7 +268,7 @@ public static class Loc
         ["main.autostart"] = "Запускать вместе с Windows",
         ["main.autostart.note"] = "Подсветкой управляет OpenRGB, поэтому автозапуск CaseLight имеет смысл только вместе с автозапуском OpenRGB.",
         ["main.autopaint"] = "Сразу начинать раскраску",
-        ["main.server"] = "Сервер OpenRGB",
+        ["openrgb.start"] = "Запуск сервера",
         ["main.serverstart"] = "Запускать OpenRGB, если он не запущен",
         ["main.serverstart.note"] = "Сервер запускается с ключами --server --startminimized: первый открывает порт 6742, второй убирает окно.",
         ["main.admin"] = "Запускать от администратора с запросом",
@@ -480,6 +481,7 @@ public static class Loc
         ["bar.dirty"] = "There are unsaved changes",
 
         ["tab.main"] = "General",
+        ["tab.openrgb"] = "OpenRGB",
         ["tab.devices"] = "Devices",
         ["tab.capture"] = "Capture",
         ["tab.crop"] = "Cropping",
@@ -497,7 +499,7 @@ public static class Loc
         ["main.autostart"] = "Start with Windows",
         ["main.autostart.note"] = "The lighting is driven by OpenRGB, so starting CaseLight automatically only makes sense together with starting OpenRGB.",
         ["main.autopaint"] = "Start painting at once",
-        ["main.server"] = "OpenRGB server",
+        ["openrgb.start"] = "Starting the server",
         ["main.serverstart"] = "Start OpenRGB if it is not running",
         ["main.serverstart.note"] = "The server is started with --server --startminimized: the first opens port 6742, the second hides the window.",
         ["main.admin"] = "Run as administrator, with a prompt",
