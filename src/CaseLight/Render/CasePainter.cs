@@ -130,6 +130,9 @@ public sealed class CasePainter : IDisposable
     /// <summary>Holds the last picture instead of following the screen - see <see cref="Freeze"/>.</summary>
     volatile bool _frozen;
 
+    /// <summary>Capture is stood down while the display is off - see <see cref="SuspendCapture"/>.</summary>
+    volatile bool _captureSuspended;
+
     /// <summary>Set when the frame source went away: the case stays dark until frames return.</summary>
     volatile bool _sourceLost;
 
@@ -283,6 +286,7 @@ public sealed class CasePainter : IDisposable
 
         _running = true;
         _rebuild = true;
+        _captureSuspended = false;   // питание сообщит своё состояние сразу после старта
 
         _thread = new Thread(Loop)
         {
@@ -340,6 +344,30 @@ public sealed class CasePainter : IDisposable
     {
         _hub.Blackout();
         _lastWriteTicks = Environment.TickCount64;
+    }
+
+    /// <summary>
+    /// Stands our own capture down while the display is off, and lets it come back with the
+    /// display.
+    ///
+    /// A blanked screen produces no composition, so every capture path starves at once and
+    /// the ladder spends the time hunting between dead sources. None of that has to be
+    /// inferred, because the display state is reported directly.
+    ///
+    /// Only our own capture is meant: with frames coming from Rimlight it is Rimlight that
+    /// holds the screen, and it stands its own capture down the same way. Acted on by the
+    /// paint thread rather than the caller's, because the backend hands out a wait handle
+    /// that thread is sitting on.
+    /// </summary>
+    public void SuspendCapture(bool on) => _captureSuspended = on;
+
+    void ApplyCaptureSuspend()
+    {
+        if (!_captureSuspended || _capture == null) return;
+
+        StopCapture();
+        ProbeLog.Log(Loc.P("раскраска", "painting"),
+                     Loc.P("захват остановлен: экран выключен", "capture stopped: display off"));
     }
 
     /// <summary>
@@ -426,6 +454,10 @@ public sealed class CasePainter : IDisposable
                 _crop.Reset();
                 RemapZones();
             }
+
+            // Раньше веток паузы и удержания: они выходят из такта, а захват надо снять и в
+            // той, и в другой.
+            ApplyCaptureSuspend();
 
             if (_paused)
             {
@@ -696,6 +728,13 @@ public sealed class CasePainter : IDisposable
     /// </summary>
     bool TakeOwnFrame(int periodMs, double nowMs)
     {
+        // Экран погашен, захват снят: на устройствах держится то, что на них уже есть.
+        if (_captureSuspended)
+        {
+            Pace(periodMs);
+            return false;
+        }
+
         if (!EnsureCapture())
         {
             Status = Loc.P("экран для захвата не найден", "the screen to capture was not found");
