@@ -142,6 +142,16 @@ public sealed class Fixture
     /// </summary>
     public bool ColorOverride { get; set; }
 
+    /// <summary>
+    /// Whether the values below have ever been set for this fixture.
+    ///
+    /// Until they have, switching the override on takes the scene settings as they stand,
+    /// so the case does not change at that moment. After that the values belong to the
+    /// fixture and survive the switch, which is what makes it usable for comparing: on,
+    /// off, on again, and the tuning is still there.
+    /// </summary>
+    public bool ColorTuned { get; set; }
+
     public double Saturation { get; set; } = 1.0;
     public double Gamma { get; set; } = 1.0;
     public int TemperatureK { get; set; } = 5600;
@@ -153,6 +163,9 @@ public sealed class Fixture
 
     /// <summary>Same for the brightness settings - see <see cref="ColorOverride"/>.</summary>
     public bool BrightnessOverride { get; set; }
+
+    /// <summary>Same for the brightness settings - see <see cref="ColorTuned"/>.</summary>
+    public bool BrightnessTuned { get; set; }
 
     public double Brightness { get; set; } = 1.0;
     public double MinLuma { get; set; }

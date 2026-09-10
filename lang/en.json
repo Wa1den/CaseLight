@@ -146,7 +146,7 @@
   "fixture.tab.color": "Colour",
   "fixture.tab.brightness": "Brightness",
   "fixture.own": "Its own settings",
-  "fixture.own.note": "The fixture is painted by its own values, and the common settings of this section no longer reach it. Switching it on copies the common values as they stand, so nothing changes at that moment; switching it off and on again takes the common values afresh.",
+  "fixture.own.note": "The fixture is painted by its own values, and the common settings of this section no longer reach it. Until values have been set here, switching it on takes the common ones as they stand, so nothing changes at that moment. After the first edit the values stay with the fixture, and the box can be switched as often as you like: it chooses between them and the common ones.",
   "fixture.name": "Name",
   "fixture.enabled": "Included in the painting",
   "fixture.every": "Update once every N frames",
@@ -218,5 +218,5 @@
   "unit.s": " s",
   "off": "off",
   "_name": "English",
-  "_version": "10"
+  "_version": "11"
 }

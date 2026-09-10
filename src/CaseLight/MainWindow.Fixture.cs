@@ -344,11 +344,12 @@ public sealed partial class MainWindow
         }
     }
     /// <summary>
-    /// The colour settings of one fixture, a copy of the scene's own.
+    /// The colour settings of one fixture, the same set the scene has.
     ///
-    /// Switching the box on takes the scene settings as they stand for a starting point, so
-    /// the case does not change the moment it is ticked; from there the fixture keeps its
-    /// own. Switching it off and on again starts from the scene settings once more.
+    /// A fixture that has never been tuned takes the scene settings when the box is ticked,
+    /// so the case does not change at that moment. Once anything here has been moved, the
+    /// values belong to the fixture and the box only chooses between them and the common
+    /// ones - which is what makes it usable for comparing the two.
     /// </summary>
     void BuildFixtureColour(StackPanel p, Fixture f)
     {
@@ -357,7 +358,7 @@ public sealed partial class MainWindow
             if (_rebuildingUi) return;
 
             f.ColorOverride = v;
-            if (v) TakeSceneColour(f);
+            if (v && !f.ColorTuned) TakeSceneColour(f);
 
             BuildFixturePanel();
             Touch();
@@ -373,25 +374,25 @@ public sealed partial class MainWindow
         p = Dimmed(p, on);
 
         p.Children.Add(Ui.Slider(Loc.T("color.saturation"), on ? f.Saturation : scene.Saturation, 0, 3, 0.05,
-            v => { f.Saturation = v; Touch(); }, enabled: on));
+            v => { f.Saturation = v; TunedColour(f); }, enabled: on));
         p.Children.Add(Ui.Slider(Loc.T("color.gamma"), on ? f.Gamma : scene.Gamma, 0.5, 4, 0.05,
-            v => { f.Gamma = v; Touch(); }, enabled: on));
+            v => { f.Gamma = v; TunedColour(f); }, enabled: on));
         p.Children.Add(Ui.Slider(Loc.T("color.temperature"), on ? f.TemperatureK : scene.TemperatureK, 1500, 15000, 100,
-            v => { f.TemperatureK = (int)v; Touch(); }, " K", enabled: on));
+            v => { f.TemperatureK = (int)v; TunedColour(f); }, " K", enabled: on));
 
         p.Children.Add(Ui.Header(Loc.T("color.gains"), Loc.T("color.gains.note")));
         p.Children.Add(Ui.Slider(Loc.T("color.red"), on ? f.GainR : scene.GainR, 0, 2, 0.01,
-            v => { f.GainR = v; Touch(); }, enabled: on));
+            v => { f.GainR = v; TunedColour(f); }, enabled: on));
         p.Children.Add(Ui.Slider(Loc.T("color.green"), on ? f.GainG : scene.GainG, 0, 2, 0.01,
-            v => { f.GainG = v; Touch(); }, enabled: on));
+            v => { f.GainG = v; TunedColour(f); }, enabled: on));
         p.Children.Add(Ui.Slider(Loc.T("color.blue"), on ? f.GainB : scene.GainB, 0, 2, 0.01,
-            v => { f.GainB = v; Touch(); }, enabled: on));
+            v => { f.GainB = v; TunedColour(f); }, enabled: on));
 
         p.Children.Add(Ui.Header(Loc.T("color.smoothing"), Loc.T("color.smoothing.note")));
         p.Children.Add(Ui.Slider(Loc.T("color.rise"), on ? f.SmoothingRise : scene.SmoothingRise, 0.01, 1, 0.01,
-            v => { f.SmoothingRise = v; Touch(); }, enabled: on));
+            v => { f.SmoothingRise = v; TunedColour(f); }, enabled: on));
         p.Children.Add(Ui.Slider(Loc.T("color.fall"), on ? f.SmoothingFall : scene.SmoothingFall, 0.01, 1, 0.01,
-            v => { f.SmoothingFall = v; Touch(); }, enabled: on));
+            v => { f.SmoothingFall = v; TunedColour(f); }, enabled: on));
     }
 
     /// <summary>The brightness settings of one fixture - see <see cref="BuildFixtureColour"/>.</summary>
@@ -402,7 +403,7 @@ public sealed partial class MainWindow
             if (_rebuildingUi) return;
 
             f.BrightnessOverride = v;
-            if (v) TakeSceneBrightness(f);
+            if (v && !f.BrightnessTuned) TakeSceneBrightness(f);
 
             BuildFixturePanel();
             Touch();
@@ -417,23 +418,23 @@ public sealed partial class MainWindow
         p = Dimmed(p, on);
 
         p.Children.Add(Ui.Slider(Loc.T("color.brightness"), on ? f.Brightness : scene.Brightness, 0, 1, 0.01,
-            v => { f.Brightness = v; Touch(); }, "", Loc.T("color.brightness.note"), enabled: on));
+            v => { f.Brightness = v; TunedBrightness(f); }, "", Loc.T("color.brightness.note"), enabled: on));
 
         p.Children.Add(Ui.Slider(Loc.T("color.minluma"), Math.Pow(minLuma / 0.3, 1.0 / 3.0), 0, 1, 0.005,
-            v => { f.MinLuma = Math.Pow(v, 3) * 0.3; Touch(); }, "",
+            v => { f.MinLuma = Math.Pow(v, 3) * 0.3; TunedBrightness(f); }, "",
             Loc.T("color.minluma.note"),
             format: v => v <= 0 ? Loc.T("off")
                                 : (Math.Pow(v, 3) * 0.3).ToString("0.0000", CultureInfo.InvariantCulture),
             enabled: on));
 
         p.Children.Add(Ui.Slider(Loc.T("color.shadow"), on ? f.ShadowNeutral : scene.ShadowNeutral, 0, 0.4, 0.01,
-            v => { f.ShadowNeutral = v; Touch(); }, "",
+            v => { f.ShadowNeutral = v; TunedBrightness(f); }, "",
             Loc.T("color.shadow.note"),
             format: v => v <= 0 ? Loc.T("off") : v.ToString("0.##", CultureInfo.InvariantCulture),
             enabled: on));
 
         p.Children.Add(Ui.Slider(Loc.T("color.backlight"), on ? f.MinBacklight : scene.MinBacklight, 0, 0.25, 0.005,
-            v => { f.MinBacklight = v; Touch(); }, "",
+            v => { f.MinBacklight = v; TunedBrightness(f); }, "",
             Loc.T("color.backlight.note"),
             format: v => v <= 0 ? Loc.T("off") : (v * 255).ToString("0", CultureInfo.InvariantCulture),
             enabled: on));
@@ -453,6 +454,24 @@ public sealed partial class MainWindow
         var block = new StackPanel { Opacity = on ? 1.0 : 0.45 };
         parent.Children.Add(block);
         return block;
+    }
+
+    /// <summary>
+    /// Marks the fixture as tuned, so its values stay with it from now on.
+    ///
+    /// Without this the box would be a one-way door: switching it off and on to see the
+    /// difference against the common settings would throw the tuning away.
+    /// </summary>
+    void TunedColour(Fixture f)
+    {
+        f.ColorTuned = true;
+        Touch();
+    }
+
+    void TunedBrightness(Fixture f)
+    {
+        f.BrightnessTuned = true;
+        Touch();
     }
 
     void TakeSceneColour(Fixture f)

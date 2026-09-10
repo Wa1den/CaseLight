@@ -20,7 +20,7 @@ public static class Loc
     /// silently shadowed newly reworded labels, so a mismatched version rewrites it. Only
     /// the two built-in files are rewritten; added languages are left alone.
     /// </summary>
-    const string Version = "10";
+    const string Version = "11";
 
     /// <summary>
     /// Bookkeeping entries rather than translated text: the version a file was written
@@ -395,7 +395,7 @@ public static class Loc
         ["fixture.tab.color"] = "Цвет",
         ["fixture.tab.brightness"] = "Яркость",
         ["fixture.own"] = "Свои настройки",
-        ["fixture.own.note"] = "Фигура красится своими значениями, а общие настройки этого раздела её больше не касаются. При включении сюда переносятся общие значения, какими они стоят сейчас, поэтому в момент включения ничего не меняется; выключить и включить заново — снова взять общие.",
+        ["fixture.own.note"] = "Фигура красится своими значениями, а общие настройки этого раздела её больше не касаются. Пока своих значений не задавали, включение берёт общие, какими они стоят сейчас, поэтому в момент нажатия ничего не меняется. После первой правки значения остаются за фигурой, и галку можно переключать сколько угодно: она выбирает между её настройками и общими.",
         ["fixture.name"] = "Название",
         ["fixture.enabled"] = "Участвует в раскраске",
         ["fixture.every"] = "Обновлять раз в N кадров",
@@ -633,7 +633,7 @@ public static class Loc
         ["fixture.tab.color"] = "Colour",
         ["fixture.tab.brightness"] = "Brightness",
         ["fixture.own"] = "Its own settings",
-        ["fixture.own.note"] = "The fixture is painted by its own values, and the common settings of this section no longer reach it. Switching it on copies the common values as they stand, so nothing changes at that moment; switching it off and on again takes the common values afresh.",
+        ["fixture.own.note"] = "The fixture is painted by its own values, and the common settings of this section no longer reach it. Until values have been set here, switching it on takes the common ones as they stand, so nothing changes at that moment. After the first edit the values stay with the fixture, and the box can be switched as often as you like: it chooses between them and the common ones.",
         ["fixture.name"] = "Name",
         ["fixture.enabled"] = "Included in the painting",
         ["fixture.every"] = "Update once every N frames",
