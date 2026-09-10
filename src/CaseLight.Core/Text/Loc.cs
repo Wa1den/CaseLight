@@ -20,7 +20,7 @@ public static class Loc
     /// silently shadowed newly reworded labels, so a mismatched version rewrites it. Only
     /// the two built-in files are rewritten; added languages are left alone.
     /// </summary>
-    const string Version = "11";
+    const string Version = "12";
 
     /// <summary>
     /// Bookkeeping entries rather than translated text: the version a file was written
@@ -244,7 +244,7 @@ public static class Loc
         ["bar.stop"] = "Стоп",
         ["bar.fit"] = "Центрировать холст: вписать монитор и все фигуры в окно.",
         ["bar.autofit"] = "Автоцентрирование",
-        ["bar.autofit.note"] = "Раскладка вписывается в окно после каждой правки места и размера, а также при изменении ширины окна. Выключено — масштаб и положение остаются такими, какими их поставили мышью.",
+        ["bar.autofit.note"] = "Холст автоматически вписывается в окно при изменении размера окна и правках раскладки.",
         ["bar.screen"] = "Отображать данные с экрана",
         ["bar.screen.note"] = "Требует запущенной раскраски.",
         ["bar.apply"] = "Применить",
@@ -395,7 +395,8 @@ public static class Loc
         ["fixture.tab.color"] = "Цвет",
         ["fixture.tab.brightness"] = "Яркость",
         ["fixture.own"] = "Свои настройки",
-        ["fixture.own.note"] = "Фигура красится своими значениями, а общие настройки этого раздела её больше не касаются. Пока своих значений не задавали, включение берёт общие, какими они стоят сейчас, поэтому в момент нажатия ничего не меняется. После первой правки значения остаются за фигурой, и галку можно переключать сколько угодно: она выбирает между её настройками и общими.",
+        ["fixture.own.color"] = "Использовать индивидуальные настройки цвета для фигуры.",
+        ["fixture.own.brightness"] = "Использовать индивидуальные настройки яркости для фигуры.",
         ["fixture.name"] = "Название",
         ["fixture.enabled"] = "Участвует в раскраске",
         ["fixture.every"] = "Обновлять раз в N кадров",
@@ -482,7 +483,7 @@ public static class Loc
         ["bar.stop"] = "Stop",
         ["bar.fit"] = "Fit the canvas: bring the monitor and every fixture into the window.",
         ["bar.autofit"] = "Fit automatically",
-        ["bar.autofit.note"] = "The layout is fitted into the window after every edit of a place or a size, and when the window changes width. Off, the zoom and the position stay where the mouse left them.",
+        ["bar.autofit.note"] = "The canvas fits itself into the window when the window is resized and when the layout is edited.",
         ["bar.screen"] = "Show screen contents",
         ["bar.screen.note"] = "Requires the painting to be running.",
         ["bar.apply"] = "Apply",
@@ -633,7 +634,8 @@ public static class Loc
         ["fixture.tab.color"] = "Colour",
         ["fixture.tab.brightness"] = "Brightness",
         ["fixture.own"] = "Its own settings",
-        ["fixture.own.note"] = "The fixture is painted by its own values, and the common settings of this section no longer reach it. Until values have been set here, switching it on takes the common ones as they stand, so nothing changes at that moment. After the first edit the values stay with the fixture, and the box can be switched as often as you like: it chooses between them and the common ones.",
+        ["fixture.own.color"] = "Use colour settings of this fixture's own.",
+        ["fixture.own.brightness"] = "Use brightness settings of this fixture's own.",
         ["fixture.name"] = "Name",
         ["fixture.enabled"] = "Included in the painting",
         ["fixture.every"] = "Update once every N frames",

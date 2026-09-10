@@ -362,7 +362,7 @@ public sealed partial class MainWindow
 
             BuildFixturePanel();
             Touch();
-        }, Loc.T("fixture.own.note")));
+        }, Loc.T("fixture.own.color")));
 
         bool on = f.ColorOverride;
 
@@ -407,7 +407,7 @@ public sealed partial class MainWindow
 
             BuildFixturePanel();
             Touch();
-        }, Loc.T("fixture.own.note")));
+        }, Loc.T("fixture.own.brightness")));
 
         bool on = f.BrightnessOverride;
 
