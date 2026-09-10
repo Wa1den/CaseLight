@@ -131,6 +131,34 @@ public sealed class Fixture
     /// </summary>
     public int UpdateEvery { get; set; } = 1;
 
+    // ---- свои настройки цвета и яркости -----------------------------------
+
+    /// <summary>
+    /// Take the colour settings from this fixture rather than from the scene.
+    ///
+    /// One light in the case is not like the others often enough to be worth it: a strip
+    /// behind glass and a fan hub of the same nominal colour reach the eye differently, and
+    /// evening one of them out through the common settings moves everything else with it.
+    /// </summary>
+    public bool ColorOverride { get; set; }
+
+    public double Saturation { get; set; } = 1.0;
+    public double Gamma { get; set; } = 1.0;
+    public int TemperatureK { get; set; } = 5600;
+    public double GainR { get; set; } = 1.0;
+    public double GainG { get; set; } = 1.0;
+    public double GainB { get; set; } = 1.0;
+    public double SmoothingRise { get; set; } = 0.9;
+    public double SmoothingFall { get; set; } = 0.9;
+
+    /// <summary>Same for the brightness settings - see <see cref="ColorOverride"/>.</summary>
+    public bool BrightnessOverride { get; set; }
+
+    public double Brightness { get; set; } = 1.0;
+    public double MinLuma { get; set; }
+    public double ShadowNeutral { get; set; }
+    public double MinBacklight { get; set; }
+
     public Fixture Clone()
     {
         var copy = (Fixture)MemberwiseClone();

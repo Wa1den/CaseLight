@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
 using System.Windows;
@@ -67,6 +68,7 @@ public sealed partial class MainWindow
         _view.Select(f);
         SyncFixtureList();
         Touch();
+        AutoFit();
     }
 
     void DuplicateFixture()
@@ -83,6 +85,7 @@ public sealed partial class MainWindow
         _view.Select(copy);
         SyncFixtureList();
         Touch();
+        AutoFit();
     }
 
     void RemoveFixture()
@@ -93,6 +96,7 @@ public sealed partial class MainWindow
         _view.Select(null);
         SyncFixtureList();
         Touch();
+        AutoFit();
     }
 
     // ---- панель фигуры поверх холста --------------------------------------
@@ -142,15 +146,81 @@ public sealed partial class MainWindow
         });
         _fixturePanel.Children.Add(head);
 
-        _fixturePanel.Children.Add(Ui.Text(Loc.T("fixture.name"), f.Name, v => { f.Name = v; SyncFixtureList(); Touch(); }));
-        _fixturePanel.Children.Add(Ui.Check(Loc.T("fixture.enabled"), f.Enabled, v => { f.Enabled = v; SyncFixtureList(); Touch(); }));
-        _fixturePanel.Children.Add(Ui.IntBox(Loc.T("fixture.every"), f.UpdateEvery, v => { f.UpdateEvery = Math.Max(1, v); Touch(); },
+        // Полоса вкладок собрана из того же, из чего столбец разделов слева: список с
+        // горизонтальной раскладкой. Своя вкладка темы рисуется белым прямоугольником с
+        // рамкой и рядом с плоскими карточками окна выглядит чужой; к тому же три её
+        // заголовка не встают в строку на ширине панели, а перенесённые она раскладывает
+        // так, что выбранный оказывается последним.
+        var pages = new List<UIElement>();
+        var host = new ContentControl();
+
+        var strip = new ListBox
+        {
+            Background = Brushes.Transparent,
+            BorderThickness = new Thickness(0),
+            Padding = new Thickness(0),
+            Margin = new Thickness(0, 2, 0, 4)
+        };
+        ScrollViewer.SetHorizontalScrollBarVisibility(strip, ScrollBarVisibility.Disabled);
+
+        var row = new FrameworkElementFactory(typeof(StackPanel));
+        row.SetValue(StackPanel.OrientationProperty, Orientation.Horizontal);
+        strip.ItemsPanel = new ItemsPanelTemplate(row);
+
+        // Теснее, чем у разделов слева: там подписи стоят столбцом, а здесь три штуки в
+        // строку на ширине панели.
+        var itemStyle = new Style(typeof(ListBoxItem));
+        itemStyle.Setters.Add(new Setter(Control.PaddingProperty, new Thickness(10, 5, 10, 5)));
+        itemStyle.Setters.Add(new Setter(FrameworkElement.MarginProperty, new Thickness(0, 0, 4, 0)));
+        strip.ItemContainerStyle = itemStyle;
+
+        void Page(string title, Action<StackPanel> build)
+        {
+            var panel = new StackPanel();
+            build(panel);
+
+            pages.Add(panel);
+            strip.Items.Add(new ListBoxItem
+            {
+                Content = new TextBlock { Text = title, FontSize = Ui.TextSize }
+            });
+        }
+
+        Page(Loc.T("fixture.tab.main"), q => BuildFixtureMain(q, f));
+        Page(Loc.T("fixture.tab.color"), q => BuildFixtureColour(q, f));
+        Page(Loc.T("fixture.tab.brightness"), q => BuildFixtureBrightness(q, f));
+
+        strip.SelectionChanged += (_, _) =>
+        {
+            int i = strip.SelectedIndex;
+            if (i < 0 || i >= pages.Count) return;
+
+            _fixtureTab = i;
+            host.Content = pages[i];
+        };
+
+        strip.SelectedIndex = Math.Clamp(_fixtureTab, 0, pages.Count - 1);
+        host.Content = pages[strip.SelectedIndex];
+
+        _fixturePanel.Children.Add(strip);
+        _fixturePanel.Children.Add(host);
+    }
+
+    /// <summary>Which tab of the fixture panel was open, so a rebuild comes back to it.</summary>
+    int _fixtureTab;
+
+    /// <summary>Place, binding and arrangement - everything a fixture is.</summary>
+    void BuildFixtureMain(StackPanel p, Fixture f)
+    {
+        p.Children.Add(Ui.Text(Loc.T("fixture.name"), f.Name, v => { f.Name = v; SyncFixtureList(); Touch(); }));
+        p.Children.Add(Ui.Check(Loc.T("fixture.enabled"), f.Enabled, v => { f.Enabled = v; SyncFixtureList(); Touch(); }));
+        p.Children.Add(Ui.IntBox(Loc.T("fixture.every"), f.UpdateEvery, v => { f.UpdateEvery = Math.Max(1, v); Touch(); },
             Loc.T("fixture.every.note")));
 
-        _fixturePanel.Children.Add(Ui.Row(Ui.Btn(Loc.T("fixture.locate"), HighlightSelected)));
+        p.Children.Add(Ui.Row(Ui.Btn(Loc.T("fixture.locate"), HighlightSelected)));
 
         // ---- привязка
-        _fixturePanel.Children.Add(Ui.Header(Loc.T("fixture.binding")));
+        p.Children.Add(Ui.Header(Loc.T("fixture.binding")));
 
         var deviceBox = new ComboBox { Margin = new Thickness(0, 2, 0, 8) };
         foreach (var d in _hub.Devices) deviceBox.Items.Add(d.Name);
@@ -169,7 +239,7 @@ public sealed partial class MainWindow
             BuildFixturePanel();
             Touch();
         };
-        _fixturePanel.Children.Add(Ui.Labeled(Loc.T("fixture.device"), deviceBox));
+        p.Children.Add(Ui.Labeled(Loc.T("fixture.device"), deviceBox));
 
         var info = _hub.Find(f.Binding);
         if (info != null)
@@ -189,43 +259,43 @@ public sealed partial class MainWindow
                 BuildFixturePanel();
                 Touch();
             };
-            _fixturePanel.Children.Add(Ui.Labeled(Loc.T("fixture.zone"), zoneBox));
+            p.Children.Add(Ui.Labeled(Loc.T("fixture.zone"), zoneBox));
         }
         else
         {
-            _fixturePanel.Children.Add(Ui.Note(string.Format(Loc.T("fixture.missing"), f.Binding.DeviceName)));
+            p.Children.Add(Ui.Note(string.Format(Loc.T("fixture.missing"), f.Binding.DeviceName)));
         }
 
-        _fixturePanel.Children.Add(Ui.IntBox(Loc.T("fixture.first"), f.Binding.FirstLed, v => { f.Binding.FirstLed = Math.Max(0, v); Touch(); }));
-        _fixturePanel.Children.Add(Ui.IntBox(Loc.T("fixture.count"), f.Binding.LedCount, v => { f.Binding.LedCount = Math.Max(0, v); Touch(); },
+        p.Children.Add(Ui.IntBox(Loc.T("fixture.first"), f.Binding.FirstLed, v => { f.Binding.FirstLed = Math.Max(0, v); Touch(); }));
+        p.Children.Add(Ui.IntBox(Loc.T("fixture.count"), f.Binding.LedCount, v => { f.Binding.LedCount = Math.Max(0, v); Touch(); },
             Loc.T("fixture.count.note")));
 
         // ---- место
-        _fixturePanel.Children.Add(Ui.Header(Loc.T("fixture.place")));
-        _fixturePanel.Children.Add(Ui.NumBox(Loc.T("fixture.x"), f.CenterX, v => { f.CenterX = v; Touch(); }));
-        _fixturePanel.Children.Add(Ui.NumBox(Loc.T("fixture.y"), f.CenterY, v => { f.CenterY = v; Touch(); }));
+        p.Children.Add(Ui.Header(Loc.T("fixture.place")));
+        p.Children.Add(Ui.NumBox(Loc.T("fixture.x"), f.CenterX, v => { f.CenterX = v; Touch(); AutoFit(); }));
+        p.Children.Add(Ui.NumBox(Loc.T("fixture.y"), f.CenterY, v => { f.CenterY = v; Touch(); AutoFit(); }));
         // Only the dimensions the arrangement actually has. Across a strip, or across a
         // ring standing edge-on, the fixture is as wide as the sampling area covers, and a
         // field for it would be a number that changes nothing.
         if (f.Arrangement == Arrangement.Strip)
         {
-            _fixturePanel.Children.Add(Ui.NumBox(Loc.T("fixture.length"), f.Width, v => { f.Width = Math.Max(5, v); Touch(); },
+            p.Children.Add(Ui.NumBox(Loc.T("fixture.length"), f.Width, v => { f.Width = Math.Max(5, v); Touch(); AutoFit(); },
                 Loc.T("fixture.length.strip.note")));
         }
         else if (f.Arrangement == Arrangement.Closed && f.EdgeOn)
         {
-            _fixturePanel.Children.Add(Ui.NumBox(Loc.T("fixture.length"), f.Height, v => { f.Height = Math.Max(5, v); Touch(); },
+            p.Children.Add(Ui.NumBox(Loc.T("fixture.length"), f.Height, v => { f.Height = Math.Max(5, v); Touch(); AutoFit(); },
                 Loc.T("fixture.length.ring.note")));
         }
         else if (f.Arrangement != Arrangement.Point)
         {
-            _fixturePanel.Children.Add(Ui.NumBox(Loc.T("fixture.width"), f.Width, v => { f.Width = Math.Max(5, v); Touch(); }));
-            _fixturePanel.Children.Add(Ui.NumBox(Loc.T("fixture.height"), f.Height, v => { f.Height = Math.Max(5, v); Touch(); }));
+            p.Children.Add(Ui.NumBox(Loc.T("fixture.width"), f.Width, v => { f.Width = Math.Max(5, v); Touch(); AutoFit(); }));
+            p.Children.Add(Ui.NumBox(Loc.T("fixture.height"), f.Height, v => { f.Height = Math.Max(5, v); Touch(); AutoFit(); }));
         }
-        _fixturePanel.Children.Add(Ui.NumBox(Loc.T("fixture.rotation"), f.AngleDeg, v => { f.AngleDeg = v; Touch(); }));
+        p.Children.Add(Ui.NumBox(Loc.T("fixture.rotation"), f.AngleDeg, v => { f.AngleDeg = v; Touch(); AutoFit(); }));
 
         // ---- раскладка
-        _fixturePanel.Children.Add(Ui.Header(Loc.T("fixture.arrangement")));
+        p.Children.Add(Ui.Header(Loc.T("fixture.arrangement")));
 
         var kindBox = new ComboBox { Margin = new Thickness(0, 2, 0, 8) };
         kindBox.Items.Add(Loc.T("fixture.arr.strip"));
@@ -248,14 +318,14 @@ public sealed partial class MainWindow
             BuildFixturePanel();
             Touch();
         };
-        _fixturePanel.Children.Add(Ui.Labeled(Loc.T("fixture.shape"), kindBox));
+        p.Children.Add(Ui.Labeled(Loc.T("fixture.shape"), kindBox));
 
         if (f.Arrangement == Arrangement.Closed)
         {
-            _fixturePanel.Children.Add(Ui.Check(Loc.T("fixture.round"), f.RoundContour, v => { f.RoundContour = v; BuildFixturePanel(); Touch(); }));
+            p.Children.Add(Ui.Check(Loc.T("fixture.round"), f.RoundContour, v => { f.RoundContour = v; BuildFixturePanel(); Touch(); }));
 
             if (!f.RoundContour)
-                _fixturePanel.Children.Add(Ui.Slider(Loc.T("fixture.aspect"), AspectToScale(f.ContourAspect), -10, 10, 0.1,
+                p.Children.Add(Ui.Slider(Loc.T("fixture.aspect"), AspectToScale(f.ContourAspect), -10, 10, 0.1,
                     v => { f.ContourAspect = ScaleToAspect(v); Touch(); }, "",
                     Loc.T("fixture.aspect.note"),
                     format: DescribeAspect));
@@ -263,15 +333,146 @@ public sealed partial class MainWindow
 
         if (f.Arrangement != Arrangement.Point)
         {
-            _fixturePanel.Children.Add(AnchorRow(f));
-            _fixturePanel.Children.Add(Ui.Check(Loc.T("fixture.reverse"), f.Reverse, v => { f.Reverse = v; Touch(); }));
+            p.Children.Add(AnchorRow(f));
+            p.Children.Add(Ui.Check(Loc.T("fixture.reverse"), f.Reverse, v => { f.Reverse = v; Touch(); }));
         }
 
         if (f.Arrangement == Arrangement.Closed)
         {
-            _fixturePanel.Children.Add(Ui.Check(Loc.T("fixture.edgeon"), f.EdgeOn, v => { f.EdgeOn = v; BuildFixturePanel(); Touch(); },
+            p.Children.Add(Ui.Check(Loc.T("fixture.edgeon"), f.EdgeOn, v => { f.EdgeOn = v; BuildFixturePanel(); Touch(); },
                 Loc.T("fixture.edgeon.note")));
         }
+    }
+    /// <summary>
+    /// The colour settings of one fixture, a copy of the scene's own.
+    ///
+    /// Switching the box on takes the scene settings as they stand for a starting point, so
+    /// the case does not change the moment it is ticked; from there the fixture keeps its
+    /// own. Switching it off and on again starts from the scene settings once more.
+    /// </summary>
+    void BuildFixtureColour(StackPanel p, Fixture f)
+    {
+        p.Children.Add(Ui.Check(Loc.T("fixture.own"), f.ColorOverride, v =>
+        {
+            if (_rebuildingUi) return;
+
+            f.ColorOverride = v;
+            if (v) TakeSceneColour(f);
+
+            BuildFixturePanel();
+            Touch();
+        }, Loc.T("fixture.own.note")));
+
+        bool on = f.ColorOverride;
+
+        // Пока галка снята, показываются общие значения: ими фигура и красится, а её
+        // собственные числа сейчас ни при чём. Их же включение и переносит, поэтому подписи
+        // от нажатия не прыгают.
+        var scene = _scene;
+
+        p = Dimmed(p, on);
+
+        p.Children.Add(Ui.Slider(Loc.T("color.saturation"), on ? f.Saturation : scene.Saturation, 0, 3, 0.05,
+            v => { f.Saturation = v; Touch(); }, enabled: on));
+        p.Children.Add(Ui.Slider(Loc.T("color.gamma"), on ? f.Gamma : scene.Gamma, 0.5, 4, 0.05,
+            v => { f.Gamma = v; Touch(); }, enabled: on));
+        p.Children.Add(Ui.Slider(Loc.T("color.temperature"), on ? f.TemperatureK : scene.TemperatureK, 1500, 15000, 100,
+            v => { f.TemperatureK = (int)v; Touch(); }, " K", enabled: on));
+
+        p.Children.Add(Ui.Header(Loc.T("color.gains"), Loc.T("color.gains.note")));
+        p.Children.Add(Ui.Slider(Loc.T("color.red"), on ? f.GainR : scene.GainR, 0, 2, 0.01,
+            v => { f.GainR = v; Touch(); }, enabled: on));
+        p.Children.Add(Ui.Slider(Loc.T("color.green"), on ? f.GainG : scene.GainG, 0, 2, 0.01,
+            v => { f.GainG = v; Touch(); }, enabled: on));
+        p.Children.Add(Ui.Slider(Loc.T("color.blue"), on ? f.GainB : scene.GainB, 0, 2, 0.01,
+            v => { f.GainB = v; Touch(); }, enabled: on));
+
+        p.Children.Add(Ui.Header(Loc.T("color.smoothing"), Loc.T("color.smoothing.note")));
+        p.Children.Add(Ui.Slider(Loc.T("color.rise"), on ? f.SmoothingRise : scene.SmoothingRise, 0.01, 1, 0.01,
+            v => { f.SmoothingRise = v; Touch(); }, enabled: on));
+        p.Children.Add(Ui.Slider(Loc.T("color.fall"), on ? f.SmoothingFall : scene.SmoothingFall, 0.01, 1, 0.01,
+            v => { f.SmoothingFall = v; Touch(); }, enabled: on));
+    }
+
+    /// <summary>The brightness settings of one fixture - see <see cref="BuildFixtureColour"/>.</summary>
+    void BuildFixtureBrightness(StackPanel p, Fixture f)
+    {
+        p.Children.Add(Ui.Check(Loc.T("fixture.own"), f.BrightnessOverride, v =>
+        {
+            if (_rebuildingUi) return;
+
+            f.BrightnessOverride = v;
+            if (v) TakeSceneBrightness(f);
+
+            BuildFixturePanel();
+            Touch();
+        }, Loc.T("fixture.own.note")));
+
+        bool on = f.BrightnessOverride;
+
+        // Как и на вкладке цвета: со снятой галкой видны общие значения.
+        var scene = _scene;
+        double minLuma = on ? f.MinLuma : scene.MinLuma;
+
+        p = Dimmed(p, on);
+
+        p.Children.Add(Ui.Slider(Loc.T("color.brightness"), on ? f.Brightness : scene.Brightness, 0, 1, 0.01,
+            v => { f.Brightness = v; Touch(); }, "", Loc.T("color.brightness.note"), enabled: on));
+
+        p.Children.Add(Ui.Slider(Loc.T("color.minluma"), Math.Pow(minLuma / 0.3, 1.0 / 3.0), 0, 1, 0.005,
+            v => { f.MinLuma = Math.Pow(v, 3) * 0.3; Touch(); }, "",
+            Loc.T("color.minluma.note"),
+            format: v => v <= 0 ? Loc.T("off")
+                                : (Math.Pow(v, 3) * 0.3).ToString("0.0000", CultureInfo.InvariantCulture),
+            enabled: on));
+
+        p.Children.Add(Ui.Slider(Loc.T("color.shadow"), on ? f.ShadowNeutral : scene.ShadowNeutral, 0, 0.4, 0.01,
+            v => { f.ShadowNeutral = v; Touch(); }, "",
+            Loc.T("color.shadow.note"),
+            format: v => v <= 0 ? Loc.T("off") : v.ToString("0.##", CultureInfo.InvariantCulture),
+            enabled: on));
+
+        p.Children.Add(Ui.Slider(Loc.T("color.backlight"), on ? f.MinBacklight : scene.MinBacklight, 0, 0.25, 0.005,
+            v => { f.MinBacklight = v; Touch(); }, "",
+            Loc.T("color.backlight.note"),
+            format: v => v <= 0 ? Loc.T("off") : (v * 255).ToString("0", CultureInfo.InvariantCulture),
+            enabled: on));
+    }
+
+    /// <summary>
+    /// The block the settings of a tab go into, dimmed while the fixture takes them from
+    /// the scene.
+    ///
+    /// The controls themselves are switched off one by one, and a disabled slider in this
+    /// theme looks almost like a live one; dimming the block says plainly that nothing here
+    /// is in use. Hit testing is left alone, so the explanation glyphs still answer - a
+    /// setting that cannot be moved is the one whose reason is worth reading.
+    /// </summary>
+    static StackPanel Dimmed(StackPanel parent, bool on)
+    {
+        var block = new StackPanel { Opacity = on ? 1.0 : 0.45 };
+        parent.Children.Add(block);
+        return block;
+    }
+
+    void TakeSceneColour(Fixture f)
+    {
+        f.Saturation = _scene.Saturation;
+        f.Gamma = _scene.Gamma;
+        f.TemperatureK = _scene.TemperatureK;
+        f.GainR = _scene.GainR;
+        f.GainG = _scene.GainG;
+        f.GainB = _scene.GainB;
+        f.SmoothingRise = _scene.SmoothingRise;
+        f.SmoothingFall = _scene.SmoothingFall;
+    }
+
+    void TakeSceneBrightness(Fixture f)
+    {
+        f.Brightness = _scene.Brightness;
+        f.MinLuma = _scene.MinLuma;
+        f.ShadowNeutral = _scene.ShadowNeutral;
+        f.MinBacklight = _scene.MinBacklight;
     }
 
     /// <summary>

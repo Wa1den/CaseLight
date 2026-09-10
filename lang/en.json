@@ -3,7 +3,9 @@
   "nav.canvas": "Show canvas",
   "bar.start": "Start",
   "bar.stop": "Stop",
-  "bar.fit": "Fit canvas",
+  "bar.fit": "Fit the canvas: bring the monitor and every fixture into the window.",
+  "bar.autofit": "Fit automatically",
+  "bar.autofit.note": "The layout is fitted into the window after every edit of a place or a size, and when the window changes width. Off, the zoom and the position stay where the mouse left them.",
   "bar.screen": "Show screen contents",
   "bar.screen.note": "Requires the painting to be running.",
   "bar.apply": "Apply",
@@ -140,6 +142,11 @@
   "tray.exit": "Exit",
   "fixture.close": "Close parameters",
   "fixture.head": "Fixture parameters",
+  "fixture.tab.main": "General",
+  "fixture.tab.color": "Colour",
+  "fixture.tab.brightness": "Brightness",
+  "fixture.own": "Its own settings",
+  "fixture.own.note": "The fixture is painted by its own values, and the common settings of this section no longer reach it. Switching it on copies the common values as they stand, so nothing changes at that moment; switching it off and on again takes the common values afresh.",
   "fixture.name": "Name",
   "fixture.enabled": "Included in the painting",
   "fixture.every": "Update once every N frames",
@@ -211,5 +218,5 @@
   "unit.s": " s",
   "off": "off",
   "_name": "English",
-  "_version": "7"
+  "_version": "10"
 }

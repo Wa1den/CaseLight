@@ -279,6 +279,14 @@ public sealed class Scene
     /// <summary>Whether the canvas is shown at all, or the window is just the settings.</summary>
     public bool ShowCanvas { get; set; } = true;
 
+    /// <summary>
+    /// Keeps the monitor and every fixture in view without the button being pressed.
+    ///
+    /// Off by default: a canvas that re-centres itself takes the zoom away, and someone
+    /// working on one corner of the case put it there on purpose.
+    /// </summary>
+    public bool AutoFitCanvas { get; set; }
+
     // ---- тест размещения --------------------------------------------------
 
     public TestShape TestShape { get; set; } = TestShape.Circle;
