@@ -46,6 +46,9 @@ public sealed partial class MainWindow : Window
     /// <summary>Takes the sampling circle off the canvas once the value has settled.</summary>
     readonly DispatcherTimer _sampleHint = new() { Interval = TimeSpan.FromMilliseconds(1200) };
 
+    /// <summary>Waits out the edit before the canvas re-centres itself - see <see cref="AutoFit"/>.</summary>
+    readonly DispatcherTimer _autoFit = new() { Interval = TimeSpan.FromMilliseconds(350) };
+
     Scene _scene = Scene.Load();
     Scene _saved = null!;
     CasePainter _painter = null!;
@@ -67,6 +70,7 @@ public sealed partial class MainWindow : Window
     Button _cancelButton = null!;
     TextBlock _dirtyText = null!;
     Button _fitButton = null!;
+    UIElement _autoFitToggle = null!;
     UIElement _screenToggle = null!;
 
     /// <summary>Window width with the canvas open, to come back to when it is shown again.</summary>
@@ -175,7 +179,10 @@ public sealed partial class MainWindow : Window
         // scene exactly as typing a coordinate does, so the pending-changes bar has to say
         // so - but rebuilding the panel and serialising the scene are not worth doing a
         // hundred times for one gesture.
-        _view.FixtureEdited += (_, _) => { BuildFixturePanel(); Touch(); };
+        _view.FixtureEdited += (_, _) => { BuildFixturePanel(); Touch(); AutoFit(); };
+
+        // Окно меняет ширину вместе с холстом, и раскладка иначе уезжает за его край.
+        _view.SizeChanged += (_, _) => AutoFit();
         _view.TestMoved += (_, _) => PushTestPatch();
 
         HookPower();
@@ -221,6 +228,8 @@ public sealed partial class MainWindow : Window
             _view.ShowSampleArea = false;
             _view.InvalidateVisual();
         };
+
+        _autoFit.Tick += (_, _) => { _autoFit.Stop(); _view.FitToContent(); };
 
         // a Windows shutdown must not be cancelled into the tray
         Application.Current.SessionEnding += (_, _) => _reallyClosing = true;
@@ -383,8 +392,6 @@ public sealed partial class MainWindow : Window
         actions.Children.Add(_startButton);
         actions.Children.Add(_stopButton);
 
-        _fitButton = Ui.Btn(Loc.T("bar.fit"), () => _view.FitToContent());
-        actions.Children.Add(_fitButton);
         DockPanel.SetDock(actions, Dock.Left);
         bottom.Children.Add(actions);
 
@@ -393,6 +400,14 @@ public sealed partial class MainWindow : Window
         // of the whole bar and the buttons rode along its top edge - and hiding the canvas
         // took the checkbox away and dropped them by those few pixels.
         actions.SizeChanged += (_, _) => bottom.Height = actions.ActualHeight;
+
+        // Правый край DockPanel достаётся тому, кто добавлен раньше, поэтому кнопка идёт
+        // первой и оказывается в самом углу.
+        _fitButton = BuildFitButton();
+        bottom.Children.Add(_fitButton);
+
+        _autoFitToggle = BuildAutoFitToggle();
+        bottom.Children.Add(_autoFitToggle);
 
         _screenToggle = BuildScreenToggle();
         bottom.Children.Add(_screenToggle);
@@ -441,6 +456,56 @@ public sealed partial class MainWindow : Window
             ApplyScreenPreview();
             Touch();
         }, Loc.T("bar.screen.note"));
+
+        if (toggle is FrameworkElement box) box.Margin = new Thickness(12, 0, 0, 0);
+        DockPanel.SetDock(toggle, Dock.Right);
+        return toggle;
+    }
+
+    /// <summary>
+    /// The canvas fit, an icon in the corner rather than a caption among the buttons on the
+    /// left: it is a way of looking at the layout, like the two switches beside it, and not
+    /// something the painting does.
+    /// </summary>
+    Button BuildFitButton()
+    {
+        var button = new Button
+        {
+            Content = new TextBlock { Text = "\uE799", FontFamily = Ui.IconFont, FontSize = 12 },
+            Padding = new Thickness(9, 4, 9, 4),
+            Margin = new Thickness(12, 0, 0, 0),
+            VerticalAlignment = VerticalAlignment.Center,
+
+            // всплывающая подсказка наследует шрифт значка, а в нём букв нет
+            ToolTip = new TextBlock
+            {
+                Text = Loc.T("bar.fit"),
+                TextWrapping = TextWrapping.Wrap,
+                MaxWidth = 320,
+                FontFamily = new FontFamily("Segoe UI"),
+                FontSize = 12
+            }
+        };
+
+        button.Click += (_, _) => _view.FitToContent();
+        DockPanel.SetDock(button, Dock.Right);
+        return button;
+    }
+
+    /// <summary>
+    /// Keeps the whole layout in view by itself. Built apart from the bar for the same
+    /// reason as the screen switch: its explanation lives inside the element.
+    /// </summary>
+    UIElement BuildAutoFitToggle()
+    {
+        var toggle = Ui.Check(Loc.T("bar.autofit"), _scene.AutoFitCanvas, v =>
+        {
+            if (_rebuildingUi) return;
+
+            _scene.AutoFitCanvas = v;
+            if (v) _view.FitToContent();
+            Touch();
+        }, Loc.T("bar.autofit.note"));
 
         if (toggle is FrameworkElement box) box.Margin = new Thickness(12, 0, 0, 0);
         DockPanel.SetDock(toggle, Dock.Right);
@@ -582,6 +647,7 @@ public sealed partial class MainWindow : Window
         _pages.Clear();
 
         BuildGeneralSection();
+        BuildOpenRgbSection();
         BuildDevicesSection();
         BuildCaptureSection();
         BuildCropSection();
@@ -619,13 +685,27 @@ public sealed partial class MainWindow : Window
     {
         _canvasToggle.IsChecked = _scene.ShowCanvas;
 
-        int at = _bottomBar.Children.IndexOf(_screenToggle);
-        if (at < 0) return;
+        _screenToggle = Replace(_screenToggle, BuildScreenToggle());
+        _autoFitToggle = Replace(_autoFitToggle, BuildAutoFitToggle());
+
+        _fitButton = Replace(_fitButton, BuildFitButton());
+    }
+
+    /// <summary>
+    /// Puts a freshly built control in the old one's place in the bar.
+    ///
+    /// These carry their explanations inside themselves, so a language change and a cancel
+    /// alike are answered by building them again rather than by reassigning anything.
+    /// </summary>
+    T Replace<T>(T old, T fresh) where T : UIElement
+    {
+        int at = _bottomBar.Children.IndexOf(old);
+        if (at < 0) return old;
 
         _bottomBar.Children.RemoveAt(at);
-        _screenToggle = BuildScreenToggle();
-        _bottomBar.Children.Insert(at, _screenToggle);
-        _screenToggle.Visibility = _scene.ShowCanvas ? Visibility.Visible : Visibility.Collapsed;
+        _bottomBar.Children.Insert(at, fresh);
+        fresh.Visibility = _scene.ShowCanvas ? Visibility.Visible : Visibility.Collapsed;
+        return fresh;
     }
 
     void BuildGeneralSection() => AddSection(Loc.T("tab.main"), "\uE713", panel =>
@@ -653,7 +733,35 @@ public sealed partial class MainWindow : Window
             Loc.T("main.autostart.note")));
         panel.Children.Add(Ui.Check(Loc.T("main.autopaint"), _scene.StartPaintingOnLaunch, v => { _scene.StartPaintingOnLaunch = v; Touch(); }));
 
-        panel.Children.Add(Ui.Header(Loc.T("main.server")));
+        panel.Children.Add(Ui.Header(Loc.T("main.settings"),
+            Loc.T("main.settings.note")));
+        panel.Children.Add(Ui.Row(
+            Ui.Btn(Loc.T("main.export"), ExportSettings),
+            Ui.Btn(Loc.T("main.import"), ImportSettings),
+            Ui.Btn(Loc.T("main.reset"), ResetSettings),
+            Ui.HelpIcon(Loc.T("main.reset.note"))));
+
+        panel.Children.Add(Ui.Header(Loc.T("main.logs"), Loc.T("main.logs.note")));
+        panel.Children.Add(Ui.Check(Loc.T("main.log"), _scene.WriteLog, v =>
+        {
+            _scene.WriteLog = v;
+            ProbeLog.Configure(Scene.LogPath, v);
+            Touch();
+        }));
+        panel.Children.Add(Ui.PathLink(Scene.LogPath));
+    });
+
+    /// <summary>
+    /// Everything about the server the lighting is driven through, including what to do
+    /// with it after a wake.
+    ///
+    /// A section of its own because these settings are about a neighbouring program rather
+    /// than about this one, and in «Основное» they took up more room than everything else
+    /// there together.
+    /// </summary>
+    void BuildOpenRgbSection() => AddSection(Loc.T("tab.openrgb"), "\uE968", panel =>
+    {
+        panel.Children.Add(Ui.Header(Loc.T("openrgb.start")));
         panel.Children.Add(Ui.Check(Loc.T("main.serverstart"), _scene.AutoStartOpenRgb, v => { _scene.AutoStartOpenRgb = v; Touch(); },
             Loc.T("main.serverstart.note")));
         panel.Children.Add(Ui.Check(Loc.T("main.admin"), _scene.OpenRgbAsAdmin, SetRunAsAdmin,
@@ -679,22 +787,26 @@ public sealed partial class MainWindow : Window
             string.IsNullOrWhiteSpace(_scene.OpenRgbPath) ? null : _scene.OpenRgbPath, _scene.OpenRgbAsAdmin))),
             Ui.Btn(Loc.T("main.reconnect"), ConnectHub)));
 
-        panel.Children.Add(Ui.Header(Loc.T("main.settings"),
-            Loc.T("main.settings.note")));
-        panel.Children.Add(Ui.Row(
-            Ui.Btn(Loc.T("main.export"), ExportSettings),
-            Ui.Btn(Loc.T("main.import"), ImportSettings),
-            Ui.Btn(Loc.T("main.reset"), ResetSettings),
-            Ui.HelpIcon(Loc.T("main.reset.note"))));
+        panel.Children.Add(Ui.Header(Loc.T("power.wake")));
 
-        panel.Children.Add(Ui.Header(Loc.T("main.logs"), Loc.T("main.logs.note")));
-        panel.Children.Add(Ui.Check(Loc.T("main.log"), _scene.WriteLog, v =>
+        var wakeBox = new ComboBox { Margin = new Thickness(0, 2, 0, 8) };
+        wakeBox.Items.Add(Loc.T("power.wake.nothing"));
+        wakeBox.Items.Add(Loc.T("power.wake.restart"));
+        wakeBox.SelectedIndex = Math.Max(0, Array.IndexOf(WakeModes, WakeMode));
+        wakeBox.SelectionChanged += (_, _) =>
         {
-            _scene.WriteLog = v;
-            ProbeLog.Configure(Scene.LogPath, v);
+            if (wakeBox.SelectedIndex < 0) return;
+            _scene.WakeRecovery = WakeModes[wakeBox.SelectedIndex];
             Touch();
-        }));
-        panel.Children.Add(Ui.PathLink(Scene.LogPath));
+        };
+        panel.Children.Add(Ui.Labeled(Loc.T("power.wake.what"), wakeBox,
+            Loc.T("power.wake.note")));
+
+        panel.Children.Add(Ui.Row(Ui.Btn(Loc.T("power.restartnow"), RestartServerNow)));
+
+        panel.Children.Add(Ui.Slider(Loc.T("power.delay"), _scene.ResumeDelayMs / 1000.0, 0, 30, 1,
+            v => { _scene.ResumeDelayMs = (int)(v * 1000); Touch(); }, Loc.T("unit.s"),
+            Loc.T("power.delay.note")));
     });
 
     void BuildDevicesSection()
@@ -975,27 +1087,6 @@ public sealed partial class MainWindow : Window
         panel.Children.Add(Ui.Check(Loc.T("power.off.display"), _scene.OffOnDisplayOff, v => { _scene.OffOnDisplayOff = v; Touch(); }));
         panel.Children.Add(Ui.Check(Loc.T("power.off.lock"), _scene.OffOnLock, v => { _scene.OffOnLock = v; Touch(); }));
         panel.Children.Add(Ui.Check(Loc.T("power.off.sleep"), _scene.OffOnSuspend, v => { _scene.OffOnSuspend = v; Touch(); }));
-
-        panel.Children.Add(Ui.Header(Loc.T("power.wake")));
-
-        var wakeBox = new ComboBox { Margin = new Thickness(0, 2, 0, 8) };
-        wakeBox.Items.Add(Loc.T("power.wake.nothing"));
-        wakeBox.Items.Add(Loc.T("power.wake.restart"));
-        wakeBox.SelectedIndex = Math.Max(0, Array.IndexOf(WakeModes, WakeMode));
-        wakeBox.SelectionChanged += (_, _) =>
-        {
-            if (wakeBox.SelectedIndex < 0) return;
-            _scene.WakeRecovery = WakeModes[wakeBox.SelectedIndex];
-            Touch();
-        };
-        panel.Children.Add(Ui.Labeled(Loc.T("power.wake.what"), wakeBox,
-            Loc.T("power.wake.note")));
-
-        panel.Children.Add(Ui.Row(Ui.Btn(Loc.T("power.restartnow"), RestartServerNow)));
-
-        panel.Children.Add(Ui.Slider(Loc.T("power.delay"), _scene.ResumeDelayMs / 1000.0, 0, 30, 1,
-            v => { _scene.ResumeDelayMs = (int)(v * 1000); Touch(); }, Loc.T("unit.s"),
-            Loc.T("power.delay.note")));
     });
 
     /// <summary>
@@ -1475,6 +1566,7 @@ public sealed partial class MainWindow : Window
 
         _painter.Invalidate();
         _view.InvalidateVisual();
+        AutoFit();
         UpdateDirtyBar();
         Say(string.Format(Loc.P("Экран из Rimlight: {0}, {1} × {2} мм", "Screen from Rimlight: {0}, {1} × {2} mm"),
                           monitor.DisplayName, w.ToString("F0"), h.ToString("F0")));
@@ -1562,6 +1654,21 @@ public sealed partial class MainWindow : Window
     }
 
     /// <summary>
+    /// Brings the whole layout back into view, when the switch under the canvas asks for it.
+    ///
+    /// Held back by a timer rather than done on the spot: a coordinate typed into the
+    /// fixture panel arrives a character at a time, and a canvas that re-centres on every
+    /// keystroke cannot be typed into.
+    /// </summary>
+    void AutoFit()
+    {
+        if (!_scene.AutoFitCanvas) return;
+
+        _autoFit.Stop();
+        _autoFit.Start();
+    }
+
+    /// <summary>
     /// Puts the sampling circle on the canvas and takes it away once the value stops moving.
     ///
     /// Tied to the value rather than to the mouse: the slider answers to the wheel and to
@@ -1594,6 +1701,7 @@ public sealed partial class MainWindow : Window
         _canvasShown = show;
 
         _fitButton.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
+        _autoFitToggle.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
         _screenToggle.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
 
         if (show)
@@ -1662,7 +1770,6 @@ public sealed partial class MainWindow : Window
         _canvasToggle.Content = Loc.T("nav.canvas");
         _startButton.Content = Loc.T("bar.start");
         _stopButton.Content = Loc.T("bar.stop");
-        _fitButton.Content = Loc.T("bar.fit");
         _applyButton.Content = Loc.T("bar.apply");
         _cancelButton.Content = Loc.T("bar.cancel");
         _dirtyText.Text = Loc.T("bar.dirty");

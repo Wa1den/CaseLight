@@ -59,10 +59,33 @@ public sealed class CasePainter : IDisposable
     /// </summary>
     const int MinPeriodMs = 4;
 
+    /// <summary>
+    /// One run of LEDs painted by one set of colour settings, with the pipeline that keeps
+    /// their smoothing.
+    ///
+    /// A fixture may take colour or brightness from itself instead of from the scene, and
+    /// the pipeline holds one set of settings for the whole call - so the frame is walked
+    /// fixture by fixture. The LEDs of a fixture are laid out contiguously by
+    /// <see cref="Rebuild"/>, so a run is a slice; the slice is copied in and out because
+    /// the pipeline reads and writes from the start of the arrays it is given.
+    /// </summary>
+    sealed class Group
+    {
+        public int Start;
+        public int Count;
+        public ColorSettings Settings;
+        public double ShadowNeutral;
+        public readonly ColorPipeline Pipe = new();
+        public byte[] In = Array.Empty<byte>();
+        public byte[] Out = Array.Empty<byte>();
+    }
+
     readonly RgbHub _hub;
     readonly FrameSubscriber _bus = new();
-    readonly ColorPipeline _pipeline = new();
     readonly CropDetector _crop = new();
+
+    /// <summary>Rebuilt together with the zones; only the paint thread reads it.</summary>
+    Group[] _groups = Array.Empty<Group>();
     readonly FrameFilter _filter = new();
 
     /// <summary>Our own capture, used when the frames do not come from Rimlight.</summary>
@@ -480,7 +503,7 @@ public sealed class CasePainter : IDisposable
             if (_resetPipeline)
             {
                 _resetPipeline = false;
-                _pipeline.Reset(_zones.Length);
+                foreach (var g in _groups) g.Pipe.Reset(g.Count);
             }
 
             // Между кадрами, а не внутри: перечитывание меняет длины буферов.
@@ -562,8 +585,7 @@ public sealed class CasePainter : IDisposable
             // Такт цикла выжидается уже без замка, чтобы пауза не ждала целый период.
             lock (_sendGate)
             {
-                _pipeline.Process(_sampled, _output, ColourSettings(), _zones.Length, dt <= 0 ? periodMs : dt);
-                NeutraliseShadows(_scene.ShadowNeutral);
+                ProcessColour(dt <= 0 ? periodMs : dt);
 
                 nothingToWrite = _paused || _frozen || _dueNow.Count == 0;
                 if (!nothingToWrite) linkLost = !WriteFrameLocked(_dueNow);
@@ -964,15 +986,35 @@ public sealed class CasePainter : IDisposable
     /// the tint is a proportion between the channels, and pulling them back towards their
     /// own luminance removes it without touching how bright the LED ends up.
     /// </summary>
-    void NeutraliseShadows(double knee)
+    /// <summary>
+    /// Takes the sampled colours through the pipeline, one fixture at a time.
+    ///
+    /// One call per fixture rather than one for the whole frame, because the settings a
+    /// fixture is painted by may be its own and the pipeline takes one set per call.
+    /// </summary>
+    void ProcessColour(double dtMs)
+    {
+        foreach (var g in _groups)
+        {
+            int bytes = g.Count * 3;
+            if (g.Start * 3 + bytes > _sampled.Length) continue;
+
+            Array.Copy(_sampled, g.Start * 3, g.In, 0, bytes);
+            g.Pipe.Process(g.In, g.Out, g.Settings, g.Count, dtMs);
+            NeutraliseShadows(g.Out, g.ShadowNeutral);
+            Array.Copy(g.Out, 0, _output, g.Start * 3, bytes);
+        }
+    }
+
+    void NeutraliseShadows(byte[] output, double knee)
     {
         if (knee <= 0) return;
 
         double limit = knee * 255.0;
 
-        for (int i = 0; i + 2 < _output.Length; i += 3)
+        for (int i = 0; i + 2 < output.Length; i += 3)
         {
-            double r = _output[i], g = _output[i + 1], b = _output[i + 2];
+            double r = output[i], g = output[i + 1], b = output[i + 2];
 
             double y = 0.2126 * r + 0.7152 * g + 0.0722 * b;
             if (y >= limit) continue;
@@ -980,28 +1022,35 @@ public sealed class CasePainter : IDisposable
             // 1 at the knee, 0 at black: the darker it is, the greyer it comes out
             double keep = y / limit;
 
-            _output[i] = Fade(y, r, keep);
-            _output[i + 1] = Fade(y, g, keep);
-            _output[i + 2] = Fade(y, b, keep);
+            output[i] = Fade(y, r, keep);
+            output[i + 1] = Fade(y, g, keep);
+            output[i + 2] = Fade(y, b, keep);
         }
     }
 
     static byte Fade(double luma, double channel, double keep) =>
         (byte)Math.Clamp(Math.Round(luma + (channel - luma) * keep), 0, 255);
 
-    ColorSettings ColourSettings() => new()
+    /// <summary>
+    /// What one fixture is painted by: the scene settings, or its own where it was asked to
+    /// keep its own. The two halves are independent, so colour may be its own while
+    /// brightness comes from the scene.
+    /// </summary>
+    ColorSettings ColourSettingsFor(Fixture f) => new()
     {
-        MaxBrightness = _scene.Brightness,
-        MinLuma = _scene.MinLuma,
-        Saturation = _scene.Saturation,
-        Gamma = _scene.Gamma,
-        TemperatureK = _scene.TemperatureK,
-        GainR = _scene.GainR,
-        GainG = _scene.GainG,
-        GainB = _scene.GainB,
-        MinBacklight = _scene.MinBacklight,
-        SmoothingRise = _scene.SmoothingRise,
-        SmoothingFall = _scene.SmoothingFall,
+        MaxBrightness = f.BrightnessOverride ? f.Brightness : _scene.Brightness,
+        MinLuma = f.BrightnessOverride ? f.MinLuma : _scene.MinLuma,
+        MinBacklight = f.BrightnessOverride ? f.MinBacklight : _scene.MinBacklight,
+
+        Saturation = f.ColorOverride ? f.Saturation : _scene.Saturation,
+        Gamma = f.ColorOverride ? f.Gamma : _scene.Gamma,
+        TemperatureK = f.ColorOverride ? f.TemperatureK : _scene.TemperatureK,
+        GainR = f.ColorOverride ? f.GainR : _scene.GainR,
+        GainG = f.ColorOverride ? f.GainG : _scene.GainG,
+        GainB = f.ColorOverride ? f.GainB : _scene.GainB,
+        SmoothingRise = f.ColorOverride ? f.SmoothingRise : _scene.SmoothingRise,
+        SmoothingFall = f.ColorOverride ? f.SmoothingFall : _scene.SmoothingFall,
+
         Dithering = false        // дизеринг разносит ошибку вдоль ленты; здесь диоды не в ряд
     };
 
@@ -1017,6 +1066,7 @@ public sealed class CasePainter : IDisposable
         var zones = new List<LedZone>();
         var targets = new List<Target>();
         var world = new List<Point>();
+        var groups = new List<Group>();
 
         _deviceDivider.Clear();
 
@@ -1047,6 +1097,7 @@ public sealed class CasePainter : IDisposable
 
             var positions = LedGeometry.World(f);
             int count = Math.Min(available, positions.Length);
+            int start = zones.Count;
 
             for (int i = 0; i < count; i++)
             {
@@ -1063,6 +1114,18 @@ public sealed class CasePainter : IDisposable
                 targets.Add(new Target(device, firstGlobal + i));
                 world.Add(positions[i]);
             }
+
+            int taken = zones.Count - start;
+            if (taken > 0)
+                groups.Add(new Group
+                {
+                    Start = start,
+                    Count = taken,
+                    Settings = ColourSettingsFor(f),
+                    ShadowNeutral = f.BrightnessOverride ? f.ShadowNeutral : _scene.ShadowNeutral,
+                    In = new byte[taken * 3],
+                    Out = new byte[taken * 3]
+                });
         }
 
         _zones = zones.ToArray();
@@ -1071,7 +1134,10 @@ public sealed class CasePainter : IDisposable
         _world = world.ToArray();
         _sampled = new byte[_zones.Length * 3];
         _output = new byte[_zones.Length * 3];
-        _pipeline.Reset(_zones.Length);
+
+        _groups = groups.ToArray();
+        foreach (var g in _groups) g.Pipe.Reset(g.Count);
+
         _resolvedGeneration = _hub.Generation;
         _blankUnused = true;
     }

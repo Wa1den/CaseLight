@@ -20,7 +20,7 @@ public static class Loc
     /// silently shadowed newly reworded labels, so a mismatched version rewrites it. Only
     /// the two built-in files are rewritten; added languages are left alone.
     /// </summary>
-    const string Version = "6";
+    const string Version = "12";
 
     /// <summary>
     /// Bookkeeping entries rather than translated text: the version a file was written
@@ -242,7 +242,9 @@ public static class Loc
 
         ["bar.start"] = "Старт",
         ["bar.stop"] = "Стоп",
-        ["bar.fit"] = "Центрировать холст",
+        ["bar.fit"] = "Центрировать холст: вписать монитор и все фигуры в окно.",
+        ["bar.autofit"] = "Автоцентрирование",
+        ["bar.autofit.note"] = "Холст автоматически вписывается в окно при изменении размера окна и правках раскладки.",
         ["bar.screen"] = "Отображать данные с экрана",
         ["bar.screen.note"] = "Требует запущенной раскраски.",
         ["bar.apply"] = "Применить",
@@ -250,6 +252,7 @@ public static class Loc
         ["bar.dirty"] = "Есть несохранённые изменения",
 
         ["tab.main"] = "Основное",
+        ["tab.openrgb"] = "OpenRGB",
         ["tab.devices"] = "Устройства",
         ["tab.capture"] = "Захват",
         ["tab.crop"] = "Кадрирование",
@@ -267,7 +270,7 @@ public static class Loc
         ["main.autostart"] = "Запускать вместе с Windows",
         ["main.autostart.note"] = "Подсветкой управляет OpenRGB, поэтому автозапуск CaseLight имеет смысл только вместе с автозапуском OpenRGB.",
         ["main.autopaint"] = "Сразу начинать раскраску",
-        ["main.server"] = "Сервер OpenRGB",
+        ["openrgb.start"] = "Запуск сервера",
         ["main.serverstart"] = "Запускать OpenRGB, если он не запущен",
         ["main.serverstart.note"] = "Сервер запускается с ключами --server --startminimized: первый открывает порт 6742, второй убирает окно.",
         ["main.admin"] = "Запускать от администратора с запросом",
@@ -388,6 +391,12 @@ public static class Loc
 
         ["fixture.close"] = "Закрыть параметры",
         ["fixture.head"] = "Параметры фигуры",
+        ["fixture.tab.main"] = "Основное",
+        ["fixture.tab.color"] = "Цвет",
+        ["fixture.tab.brightness"] = "Яркость",
+        ["fixture.own"] = "Свои настройки",
+        ["fixture.own.color"] = "Использовать индивидуальные настройки цвета для фигуры.",
+        ["fixture.own.brightness"] = "Использовать индивидуальные настройки яркости для фигуры.",
         ["fixture.name"] = "Название",
         ["fixture.enabled"] = "Участвует в раскраске",
         ["fixture.every"] = "Обновлять раз в N кадров",
@@ -472,7 +481,9 @@ public static class Loc
 
         ["bar.start"] = "Start",
         ["bar.stop"] = "Stop",
-        ["bar.fit"] = "Fit canvas",
+        ["bar.fit"] = "Fit the canvas: bring the monitor and every fixture into the window.",
+        ["bar.autofit"] = "Fit automatically",
+        ["bar.autofit.note"] = "The canvas fits itself into the window when the window is resized and when the layout is edited.",
         ["bar.screen"] = "Show screen contents",
         ["bar.screen.note"] = "Requires the painting to be running.",
         ["bar.apply"] = "Apply",
@@ -480,6 +491,7 @@ public static class Loc
         ["bar.dirty"] = "There are unsaved changes",
 
         ["tab.main"] = "General",
+        ["tab.openrgb"] = "OpenRGB",
         ["tab.devices"] = "Devices",
         ["tab.capture"] = "Capture",
         ["tab.crop"] = "Cropping",
@@ -497,7 +509,7 @@ public static class Loc
         ["main.autostart"] = "Start with Windows",
         ["main.autostart.note"] = "The lighting is driven by OpenRGB, so starting CaseLight automatically only makes sense together with starting OpenRGB.",
         ["main.autopaint"] = "Start painting at once",
-        ["main.server"] = "OpenRGB server",
+        ["openrgb.start"] = "Starting the server",
         ["main.serverstart"] = "Start OpenRGB if it is not running",
         ["main.serverstart.note"] = "The server is started with --server --startminimized: the first opens port 6742, the second hides the window.",
         ["main.admin"] = "Run as administrator, with a prompt",
@@ -618,6 +630,12 @@ public static class Loc
 
         ["fixture.close"] = "Close parameters",
         ["fixture.head"] = "Fixture parameters",
+        ["fixture.tab.main"] = "General",
+        ["fixture.tab.color"] = "Colour",
+        ["fixture.tab.brightness"] = "Brightness",
+        ["fixture.own"] = "Its own settings",
+        ["fixture.own.color"] = "Use colour settings of this fixture's own.",
+        ["fixture.own.brightness"] = "Use brightness settings of this fixture's own.",
         ["fixture.name"] = "Name",
         ["fixture.enabled"] = "Included in the painting",
         ["fixture.every"] = "Update once every N frames",
