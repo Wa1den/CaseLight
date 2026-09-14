@@ -1452,13 +1452,13 @@ public sealed partial class MainWindow : Window
                     {
                         ProbeLog.Log("OpenRGB", Loc.P("пересканирование не помогло, перезапуск: ", "the rescan did not help, restarting: ") + what);
                         what = RestartServer();
-                        back = WaitForDevices();
+                        back = WaitForDevices(wanted: devicesBefore);
                     }
                 }
                 else
                 {
                     what = RestartServer();
-                    back = WaitForDevices();
+                    back = WaitForDevices(wanted: devicesBefore);
                 }
 
                 // A restart that came back short is topped up by a rescan, which is seconds,
@@ -1497,8 +1497,9 @@ public sealed partial class MainWindow : Window
     /// controller objects hold new handles.
     ///
     /// Success is judged by what came back, not by what the server says - it said "success"
-    /// over dead handles too, which is the very state being recovered from. Detection has to
-    /// finish and find at least as many devices as there were before sleep.
+    /// over dead handles too, which is the very state being recovered from. At least as many
+    /// devices as there were before sleep have to be back in the list; the end of detection
+    /// is not waited for once they are.
     /// </summary>
     bool RescanServer(int devicesBefore, out string what)
     {
@@ -1516,25 +1517,14 @@ public sealed partial class MainWindow : Window
 
         for (int attempt = 1; ; attempt++)
         {
-            if (!_hub.Rescan())
-            {
-                what = Loc.P("поиск устройств не завершился", "device detection did not finish");
-                return false;
-            }
-
-            // The server has said detection is over, so the list read now is the whole list
-            // and there is nothing to wait out.
-            _hub.Refresh();
-
-            int found = _hub.Devices.Length;
-            if (found >= wanted)
+            if (_hub.Rescan(wanted))
             {
                 what = Loc.P("устройства найдены заново", "the devices were found again");
                 return true;
             }
 
             what = string.Format(Loc.P("после поиска найдено устройств: {0} из {1}", "devices found after detection: {0} of {1}"),
-                                 found, devicesBefore);
+                                 _hub.Devices.Length, devicesBefore);
 
             // A short list right after waking is a bus still settling, not a device gone:
             // looking again a moment later is quicker than holding every wake back by a pause.
@@ -2012,7 +2002,11 @@ public sealed partial class MainWindow : Window
     /// the connection remade, because detection finishes after the port opens and an empty
     /// list at that moment means "not yet", not "nothing here".
     /// </summary>
-    bool WaitForDevices(int attempts = 90)
+    /// <param name="wanted">
+    /// How many devices there were before sleep; once that many are back the wait is over,
+    /// detection finished or not. Zero leaves only the checks below.
+    /// </param>
+    bool WaitForDevices(int attempts = 90, int wanted = 0)
     {
         int last = -1, stable = 0;
         long since = Environment.TickCount64;
@@ -2026,6 +2020,10 @@ public sealed partial class MainWindow : Window
             else _hub.Refresh();
 
             int count = _hub.Devices.Length;
+
+            // Everything that was there before is back: the rest of detection only looks for
+            // hardware this machine was not using.
+            if (wanted > 0 && count >= wanted) return true;
 
             // A server on protocol 6 says when detection is over, and a list read after
             // that is the whole list.

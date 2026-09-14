@@ -400,6 +400,38 @@ public sealed class ServerChannel : IDisposable
         }
     }
 
+    /// <summary>How many detections have ended since this connection was made.</summary>
+    public int CompletedDetections { get { lock (_gate) return _completed; } }
+
+    /// <summary>Asks for a rescan and waits only for detection to begin.</summary>
+    /// <returns>False if the server does not support it or detection did not begin in time.</returns>
+    public bool StartRescan(int startTimeoutMs)
+    {
+        int started, completed;
+        lock (_gate)
+        {
+            if (!SupportedLocked) return false;
+            started = _started;
+            completed = _completed;
+        }
+
+        if (!Send(IdRescanDevices, 0, Array.Empty<byte>())) return false;
+
+        // a request during a detection already under way is dropped, and that detection counts
+        lock (_gate)
+            return WaitLocked(() => _started > started || _running || _completed > completed, startTimeoutMs);
+    }
+
+    /// <summary>
+    /// Waits until the list has changed or a detection has ended since the counts given,
+    /// the connection goes, or the time runs out.
+    /// </summary>
+    public void WaitForNews(int listChanges, int completedDetections, int timeoutMs)
+    {
+        lock (_gate)
+            WaitLocked(() => _listChanges != listChanges || _completed != completedDetections, timeoutMs);
+    }
+
     /// <summary>Call under <c>_gate</c>. Gives up early if the connection goes.</summary>
     bool WaitLocked(Func<bool> done, int timeoutMs)
     {

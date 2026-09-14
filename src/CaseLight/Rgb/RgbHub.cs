@@ -385,25 +385,75 @@ public sealed class RgbHub : IDisposable
     public long LastDetectionEndTicks => _server.LastCompletedTicks;
 
     /// <summary>
-    /// Asks the server to find its devices again and waits until it has.
+    /// Asks the server to find its devices again and returns as soon as
+    /// <paramref name="wanted"/> of them are back in the list, detection finished or not.
+    ///
+    /// After sleep the board was in the list a second into the rescan, while detection went
+    /// on for eight more looking for hardware this machine does not have. The server
+    /// announces every change of its list, so each announcement is read at once.
     ///
     /// The controllers come back as new objects with new ids, in whatever mode they default
-    /// to, so the list and direct mode are both marked for renewal whatever the outcome - a
-    /// detection that timed out may still have replaced some of them.
+    /// to, so direct mode is renewed on every read, and the list is left marked for one more
+    /// read after detection ends in case it found something after we stopped looking.
     /// </summary>
-    public bool Rescan(int startTimeoutMs = 5000, int completeTimeoutMs = 60000)
+    /// <returns>False if detection did not begin, ended short, or ran out of time.</returns>
+    public bool Rescan(int wanted, int startTimeoutMs = 5000, int timeoutMs = 60000)
     {
         if (!CanRescan) return false;
 
-        bool done = _server.RescanAndWait(startTimeoutMs, completeTimeoutMs);
+        int changes = _server.ListChanges;
+        int completed = _server.CompletedDetections;
+        long deadline = Environment.TickCount64 + timeoutMs;
 
+        bool started = _server.StartRescan(startTimeoutMs);
         _modesStale = true;
         _listStale = true;
 
-        ProbeLog.Log("OpenRGB", done
-            ? Loc.P("пересканирование завершено", "the rescan is complete")
-            : Loc.P("пересканирование не завершилось", "the rescan did not complete"));
-        return done;
+        if (!started)
+        {
+            ProbeLog.Log("OpenRGB", Loc.P("пересканирование не началось", "the rescan did not start"));
+            return false;
+        }
+
+        while (true)
+        {
+            int nowChanges = _server.ListChanges;
+            int nowCompleted = _server.CompletedDetections;
+
+            if (nowChanges != changes || nowCompleted != completed)
+            {
+                bool ended = nowCompleted != completed;
+                changes = nowChanges;
+                completed = nowCompleted;
+
+                _listChangesSeen = nowChanges;
+                _modesStale = true;
+                Refresh();
+
+                if (Devices.Length >= wanted)
+                {
+                    ProbeLog.Log("OpenRGB", ended
+                        ? Loc.P("пересканирование завершено", "the rescan is complete")
+                        : Loc.P("устройства вернулись, поиск ещё идёт", "the devices are back, detection goes on"));
+                    return true;
+                }
+
+                if (ended)
+                {
+                    ProbeLog.Log("OpenRGB", Loc.P("поиск закончился, не найдя всех устройств", "detection ended without finding every device"));
+                    return false;
+                }
+            }
+
+            long left = deadline - Environment.TickCount64;
+            if (left <= 0 || !_server.IsConnected)
+            {
+                ProbeLog.Log("OpenRGB", Loc.P("пересканирование не завершилось", "the rescan did not complete"));
+                return false;
+            }
+
+            _server.WaitForNews(nowChanges, nowCompleted, (int)Math.Min(left, 1000));
+        }
     }
 
     /// <summary>
