@@ -20,7 +20,7 @@ public static class Loc
     /// silently shadowed newly reworded labels, so a mismatched version rewrites it. Only
     /// the two built-in files are rewritten; added languages are left alone.
     /// </summary>
-    const string Version = "14";
+    const string Version = "15";
 
     /// <summary>
     /// Bookkeeping entries rather than translated text: the version a file was written
@@ -373,7 +373,7 @@ public static class Loc
         ["power.wake.rescanrestart"] = "Пересканировать, при неудаче перезапустить",
         ["power.wake.restart"] = "Перезапустить OpenRGB",
         ["power.wake.what"] = "Что делать",
-        ["power.wake.note"] = "Во сне контроллеры переподключаются к USB, а работавший сервер продолжает запись в прежние дескрипторы и возвращает признак успеха: подсветка остаётся в состоянии, установленном при подаче питания. Пересканирование находит устройства заново без перезапуска сервера и работает с OpenRGB 1.0 и новее. Если устройств нашлось меньше, чем было до сна, поиск повторяется, всего до трёх раз. Неудачей считается поиск, который не завершился за минуту или так и не нашёл всех устройств. Перезапуск работает с любой версией, но занимает больше времени: сервер запускается и ищет устройства с начала.",
+        ["power.wake.note"] = "Пересканирование работает только с OpenRGB 1.0 и новее, с более ранними версиями нужен перезапуск.",
         ["power.restartnow"] = "Перезапустить OpenRGB сейчас",
         ["power.delay"] = "Пауза после пробуждения",
         ["power.delay.note"] = "Сколько не трогать подсветку после выхода из сна. При пересканировании и перезапуске пауза откладывает их: контроллеры в это время переподключаются к USB, и поиск по неустоявшейся шине может найти не все устройства. С OpenRGB 1.0 паузу можно не ставить: если устройств нашлось меньше, чем было до сна, поиск повторяется. Со старыми версиями перед перезапуском выдерживается не меньше 2 с. В режиме «Ничего не делать» пауза откладывает первую запись, потому что сервер продолжает работать с прежними дескрипторами.",
@@ -614,7 +614,7 @@ public static class Loc
         ["power.wake.rescanrestart"] = "Rescan, restart if that fails",
         ["power.wake.restart"] = "Restart OpenRGB",
         ["power.wake.what"] = "What to do",
-        ["power.wake.note"] = "During sleep the controllers reconnect over USB while the running server keeps writing to the old handles and reports success: the lighting stays as the power-on state left it. A rescan finds the devices again without restarting the server and needs OpenRGB 1.0 or later. If it finds fewer devices than there were before sleep, detection is repeated, up to three times in all. It counts as failed if detection does not finish within a minute or never finds all the devices. A restart works with any version but takes longer: the server starts up and looks for devices from the beginning.",
+        ["power.wake.note"] = "A rescan works only with OpenRGB 1.0 or later; earlier versions need a restart.",
         ["power.restartnow"] = "Restart OpenRGB now",
         ["power.delay"] = "Pause after waking",
         ["power.delay.note"] = "How long the lighting is left alone after waking. With a rescan or a restart the pause delays it: the controllers are reconnecting over USB at that moment, and a scan of an unsettled bus may miss devices. With OpenRGB 1.0 the pause can stay at zero: if fewer devices are found than before sleep, the scan is repeated. With older versions at least 2 s pass before a restart. In «do nothing» mode the pause delays the first write, because the server carries on with its old handles.",
