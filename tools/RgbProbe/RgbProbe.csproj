@@ -17,7 +17,7 @@
 
   <ItemGroup>
     <!-- тот же класс, что в программе: проба проверяет именно его -->
-    <Compile Include="..\..\src\CaseLight\Rgb\DetectionChannel.cs" Link="DetectionChannel.cs" />
+    <Compile Include="..\..\src\CaseLight\Rgb\ServerChannel.cs" Link="ServerChannel.cs" />
   </ItemGroup>
 
 </Project>

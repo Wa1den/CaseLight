@@ -75,7 +75,7 @@ static class Program
     static int Rescan()
     {
         var clock = System.Diagnostics.Stopwatch.StartNew();
-        using var channel = new CaseLight.Rgb.DetectionChannel();
+        using var channel = new CaseLight.Rgb.ServerChannel();
 
         if (!channel.Connect())
         {

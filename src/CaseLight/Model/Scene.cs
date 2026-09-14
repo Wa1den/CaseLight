@@ -366,8 +366,12 @@ public sealed class Scene
     /// </summary>
     public int ResumeDelayMs { get; set; } = 2000;
 
-    /// <summary>Default is the blunt one, because it is the one that actually works.</summary>
-    public WakeRecovery WakeRecovery { get; set; } = WakeRecovery.RestartServer;
+    /// <summary>
+    /// Rescan first, restart if that fails. With frames addressed by id, OpenRGB 1.0 brought
+    /// the lighting back after sleep with a rescan of a few seconds; an older server cannot
+    /// rescan, so it goes straight to the restart it would have had anyway.
+    /// </summary>
+    public WakeRecovery WakeRecovery { get; set; } = WakeRecovery.RescanThenRestart;
 
     // ---- геометрия окна ---------------------------------------------------
 

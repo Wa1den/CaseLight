@@ -1438,8 +1438,11 @@ public sealed partial class MainWindow : Window
 
             try
             {
-                // let the USB stack finish re-enumerating before anything is asked of it
-                System.Threading.Thread.Sleep(Math.Max(2000, _scene.ResumeDelayMs));
+                // A server on protocol 6 lets a short list be caught and topped up by another
+                // rescan, so recovery can start at once. An older one has only the restart,
+                // and the restart only the pause to keep it off a bus still settling.
+                bool canRescan = _hub.CanRescan;
+                System.Threading.Thread.Sleep(canRescan ? _scene.ResumeDelayMs : Math.Max(2000, _scene.ResumeDelayMs));
 
                 if (mode is WakeRecovery.Rescan or WakeRecovery.RescanThenRestart)
                 {
@@ -1457,6 +1460,11 @@ public sealed partial class MainWindow : Window
                     what = RestartServer();
                     back = WaitForDevices();
                 }
+
+                // A restart that came back short is topped up by a rescan, which is seconds,
+                // instead of being left short or restarted again.
+                if (back && _hub.Devices.Length < devicesBefore && _hub.CanRescan)
+                    back = RescanServer(devicesBefore, out what);
             }
             finally
             {
@@ -1503,20 +1511,42 @@ public sealed partial class MainWindow : Window
             return false;
         }
 
-        if (!_hub.Rescan())
+        // no devices before sleep leaves nothing to compare with; one found is then enough
+        int wanted = Math.Max(1, devicesBefore);
+
+        for (int attempt = 1; ; attempt++)
         {
-            what = Loc.P("поиск устройств не завершился", "device detection did not finish");
-            return false;
+            if (!_hub.Rescan())
+            {
+                what = Loc.P("поиск устройств не завершился", "device detection did not finish");
+                return false;
+            }
+
+            // The server has said detection is over, so the list read now is the whole list
+            // and there is nothing to wait out.
+            _hub.Refresh();
+
+            int found = _hub.Devices.Length;
+            if (found >= wanted)
+            {
+                what = Loc.P("устройства найдены заново", "the devices were found again");
+                return true;
+            }
+
+            what = string.Format(Loc.P("после поиска найдено устройств: {0} из {1}", "devices found after detection: {0} of {1}"),
+                                 found, devicesBefore);
+
+            // A short list right after waking is a bus still settling, not a device gone:
+            // looking again a moment later is quicker than holding every wake back by a pause.
+            if (attempt >= RescanAttempts) return false;
+
+            ProbeLog.Log("OpenRGB", what + Loc.P(", повтор", ", again"));
+            System.Threading.Thread.Sleep(RescanRetryMs);
         }
-
-        bool found = WaitForDevices(20) && _hub.Devices.Length >= devicesBefore;
-
-        what = found
-            ? Loc.P("устройства найдены заново", "the devices were found again")
-            : string.Format(Loc.P("после поиска найдено устройств: {0} из {1}", "devices found after detection: {0} of {1}"),
-                            _hub.Devices.Length, devicesBefore);
-        return found;
     }
+
+    const int RescanAttempts = 3;
+    const int RescanRetryMs = 1000;
 
     /// <returns>What happened, ready for the status line.</returns>
     string RestartServer()
