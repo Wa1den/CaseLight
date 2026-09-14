@@ -98,6 +98,19 @@ public sealed class RgbHub : IDisposable
     void Report(State state, string detail = "") { _state = state; _detail = detail; }
     public DeviceInfo[] Devices { get; private set; } = Array.Empty<DeviceInfo>();
 
+    /// <summary>
+    /// The protocol 6 side connection, for rescans and the end of detection. Made after the
+    /// main connection and dropped together with it.
+    /// </summary>
+    readonly DetectionChannel _detection = new();
+
+    /// <summary>
+    /// Raised together with <see cref="_listStale"/>. A changed list may hold controllers
+    /// that are new objects on the server - after a rescan every one of them is - and those
+    /// come up in their default mode, so <see cref="_directMode"/> no longer describes them.
+    /// </summary>
+    volatile bool _modesStale;
+
     /// <summary>Safe to call repeatedly; a failure is not retried for a couple of seconds.</summary>
     public bool Connect(bool force = false)
     {
@@ -113,8 +126,9 @@ public sealed class RgbHub : IDisposable
             {
                 _client?.Dispose();
                 _client = new OpenRgbClient(name: "CaseLight");
-                _client.DeviceListUpdated += (_, _) => _listStale = true;
+                _client.DeviceListUpdated += (_, _) => { _listStale = true; _modesStale = true; };
                 _listStale = false;
+                _modesStale = false;
                 _directMode.Clear();
                 RefreshLocked();
             }
@@ -124,11 +138,13 @@ public sealed class RgbHub : IDisposable
             _client = null;
             _devices = Array.Empty<Device>();
             Devices = Array.Empty<DeviceInfo>();
+            _detection.Dispose();
             Report(State.NoConnection, ex.Message);
             return false;
         }
 
         Report(State.Connected);
+        ConnectDetection();
         return true;
     }
 
@@ -192,6 +208,7 @@ public sealed class RgbHub : IDisposable
 
         try { _client?.Dispose(); } catch { /* уже мёртв */ }
         _client = null;
+        _detection.Dispose();
 
         _devices = Array.Empty<Device>();
         Devices = Array.Empty<DeviceInfo>();
@@ -211,6 +228,13 @@ public sealed class RgbHub : IDisposable
     void RefreshLocked()
     {
         if (_client == null) return;
+
+        // сбрасывается до чтения: поиск, закончившийся во время него, поднимет флаг снова
+        if (_modesStale)
+        {
+            _modesStale = false;
+            _directMode.Clear();
+        }
 
         _devices = _client.GetAllControllerData();
 
@@ -252,42 +276,45 @@ public sealed class RgbHub : IDisposable
         }
     }
 
-    /// <summary>
-    /// Asks the server to look for hardware again, over a socket of our own.
-    ///
-    /// The client library has no such call, but the protocol does: a bare 16-byte header
-    /// with packet id 140. Kept for the record rather than for use: on this machine the
-    /// request kills the server every time, and disconnecting first changes nothing, so
-    /// the recovery path restarts the server instead.
-    /// </summary>
-    public static string RequestRescan(string host = "127.0.0.1", int port = 6742)
+    /// <summary>Whether the server takes rescan requests; see <see cref="DetectionChannel"/>.</summary>
+    public bool CanRescan
     {
-        try
+        get
         {
-            using var socket = new System.Net.Sockets.TcpClient();
-            socket.Connect(host, port);
-
-            using var stream = socket.GetStream();
-
-            var packet = new byte[16];
-            packet[0] = (byte)'O'; packet[1] = (byte)'R'; packet[2] = (byte)'G'; packet[3] = (byte)'B';
-            // device index 0, size 0 - both already zero
-            BitConverter.GetBytes(140u).CopyTo(packet, 8);   // REQUEST_RESCAN_DEVICES
-
-            stream.Write(packet, 0, packet.Length);
-            stream.Flush();
-
-            // give the server a moment to pick the request up before the socket closes
-            System.Threading.Thread.Sleep(300);
-
-            ProbeLog.Log("OpenRGB", Loc.P("запрошено пересканирование устройств", "a device rescan was requested"));
-            return Loc.P("запрошено пересканирование устройств", "a device rescan was requested");
+            if (!_detection.IsConnected && IsConnected) ConnectDetection();
+            return _detection.Supported;
         }
-        catch (Exception ex)
-        {
-            ProbeLog.Log("OpenRGB", Loc.P("пересканирование не удалось: ", "the rescan failed: ") + ex.Message);
-            return Loc.P("пересканирование не удалось: ", "the rescan failed: ") + ex.Message;
-        }
+    }
+
+    /// <summary>When the server last said detection was over; 0 if it never did on this connection.</summary>
+    public long LastDetectionEndTicks => _detection.LastCompletedTicks;
+
+    /// <summary>
+    /// Asks the server to find its devices again and waits until it has.
+    ///
+    /// The controllers come back as new objects in whatever mode they default to, so the
+    /// list and direct mode are both marked for renewal whatever the outcome - a detection
+    /// that timed out may still have replaced some of them.
+    /// </summary>
+    public bool Rescan(int startTimeoutMs = 5000, int completeTimeoutMs = 60000)
+    {
+        if (!CanRescan) return false;
+
+        bool done = _detection.RescanAndWait(startTimeoutMs, completeTimeoutMs);
+
+        _modesStale = true;
+        _listStale = true;
+
+        ProbeLog.Log("OpenRGB", done
+            ? Loc.P("пересканирование завершено", "the rescan is complete")
+            : Loc.P("пересканирование не завершилось", "the rescan did not complete"));
+        return done;
+    }
+
+    void ConnectDetection()
+    {
+        try { _detection.Connect(); }
+        catch { /* без канала остаётся всё, кроме пересканирования */ }
     }
 
     /// <summary>
@@ -438,6 +465,7 @@ public sealed class RgbHub : IDisposable
                 try { _client?.Dispose(); } catch { /* уже мёртв */ }
                 _client = null;
             }
+            _detection.Dispose();
             return false;
         }
 
@@ -548,6 +576,8 @@ public sealed class RgbHub : IDisposable
             try { _client?.Dispose(); } catch { /* уже отвалилось */ }
             _client = null;
         }
+
+        _detection.Dispose();
 
         // stale names in the interface are worse than an honest empty list
         _devices = Array.Empty<Device>();

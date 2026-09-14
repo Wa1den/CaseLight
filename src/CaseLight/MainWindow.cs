@@ -791,8 +791,10 @@ public sealed partial class MainWindow : Window
 
         var wakeBox = new ComboBox { Margin = new Thickness(0, 2, 0, 8) };
         wakeBox.Items.Add(Loc.T("power.wake.nothing"));
+        wakeBox.Items.Add(Loc.T("power.wake.rescan"));
+        wakeBox.Items.Add(Loc.T("power.wake.rescanrestart"));
         wakeBox.Items.Add(Loc.T("power.wake.restart"));
-        wakeBox.SelectedIndex = Math.Max(0, Array.IndexOf(WakeModes, WakeMode));
+        wakeBox.SelectedIndex = Math.Max(0, Array.IndexOf(WakeModes, _scene.WakeRecovery));
         wakeBox.SelectionChanged += (_, _) =>
         {
             if (wakeBox.SelectedIndex < 0) return;
@@ -1089,15 +1091,11 @@ public sealed partial class MainWindow : Window
         panel.Children.Add(Ui.Check(Loc.T("power.off.sleep"), _scene.OffOnSuspend, v => { _scene.OffOnSuspend = v; Touch(); }));
     });
 
-    /// <summary>
-    /// The recovery modes offered. Rescanning is not among them: the request kills the
-    /// server on this hardware, and with the restart no longer costing a rights prompt it
-    /// had nothing left to offer. Settings that still name it are read as a restart.
-    /// </summary>
-    static readonly WakeRecovery[] WakeModes = { WakeRecovery.Nothing, WakeRecovery.RestartServer };
-
-    WakeRecovery WakeMode =>
-        _scene.WakeRecovery == WakeRecovery.Rescan ? WakeRecovery.RestartServer : _scene.WakeRecovery;
+    /// <summary>The recovery modes in the order the list shows them, gentlest first.</summary>
+    static readonly WakeRecovery[] WakeModes =
+    {
+        WakeRecovery.Nothing, WakeRecovery.Rescan, WakeRecovery.RescanThenRestart, WakeRecovery.RestartServer
+    };
 
     void BuildAboutSection() => AddSection(Loc.T("tab.about"), "\uE897", panel =>
     {
@@ -1409,13 +1407,12 @@ public sealed partial class MainWindow : Window
     ///
     /// Resuming alone is not enough: the controllers were re-enumerated while the machine
     /// slept, and the server that stayed up keeps writing into handles that lead nowhere -
-    /// it reports success while the case shows its power-on pattern. Restarting the server
-    /// is blunt but it is what actually works; the gentler rescan is offered because it
-    /// sometimes suffices, though it is known to take the server down with it.
+    /// it reports success while the case shows its power-on pattern. The server has to open
+    /// its devices anew: by a rescan where it supports one, by a restart otherwise.
     /// </summary>
     void RecoverAfterWake()
     {
-        var mode = WakeMode;
+        var mode = _scene.WakeRecovery;
 
         if (mode == WakeRecovery.Nothing)
         {
@@ -1424,6 +1421,10 @@ public sealed partial class MainWindow : Window
         }
 
         _recovering = true;
+
+        // Nothing was asked of the server since before sleep, so the list still counts the
+        // devices that were there - the measure a rescan is checked against.
+        int devicesBefore = _hub.Devices.Length;
 
         // Stop writing before touching the server: a restart would be writing into a dying
         // process.
@@ -1440,15 +1441,22 @@ public sealed partial class MainWindow : Window
                 // let the USB stack finish re-enumerating before anything is asked of it
                 System.Threading.Thread.Sleep(Math.Max(2000, _scene.ResumeDelayMs));
 
-                // The connection goes first: a restart would otherwise be writing into a
-                // dying process.
-                _hub.Dispose();
+                if (mode is WakeRecovery.Rescan or WakeRecovery.RescanThenRestart)
+                {
+                    back = RescanServer(devicesBefore, out what);
 
-                what = OpenRgbLauncher.Restart(
-                    string.IsNullOrWhiteSpace(_scene.OpenRgbPath) ? null : _scene.OpenRgbPath,
-                    _scene.OpenRgbAsAdmin);
-
-                back = WaitForDevices();
+                    if (!back && mode == WakeRecovery.RescanThenRestart)
+                    {
+                        ProbeLog.Log("OpenRGB", Loc.P("пересканирование не помогло, перезапуск: ", "the rescan did not help, restarting: ") + what);
+                        what = RestartServer();
+                        back = WaitForDevices();
+                    }
+                }
+                else
+                {
+                    what = RestartServer();
+                    back = WaitForDevices();
+                }
             }
             finally
             {
@@ -1460,10 +1468,13 @@ public sealed partial class MainWindow : Window
 
             Dispatcher.Invoke(() =>
             {
-                Say(string.Format(back
-                    ? Loc.P("{0}; подсветка восстановлена", "{0}; the lighting is back")
-                    : Loc.P("{0}; сервер не отвечает, нажмите «Переподключиться»",
-                            "{0}; the server is not responding, press «Reconnect»"), what));
+                Say(back
+                    ? string.Format(Loc.P("{0}; подсветка восстановлена", "{0}; the lighting is back"), what)
+                    : mode == WakeRecovery.Rescan
+                        ? string.Format(Loc.P("{0}; остаётся перезапуск кнопкой «{1}»",
+                                              "{0}; a restart is left, with the «{1}» button"), what, Loc.T("power.restartnow"))
+                        : string.Format(Loc.P("{0}; сервер не отвечает, нажмите «Переподключиться»",
+                                              "{0}; the server is not responding, press «Reconnect»"), what));
 
                 BuildFixturePanel();
 
@@ -1471,6 +1482,52 @@ public sealed partial class MainWindow : Window
                 if (_paintingWanted && !_painter.IsRunning) _painter.Start();
             });
         });
+    }
+
+    /// <summary>
+    /// Wake recovery without a restart: the server detects its devices anew, and the new
+    /// controller objects hold new handles.
+    ///
+    /// Success is judged by what came back, not by what the server says - it said "success"
+    /// over dead handles too, which is the very state being recovered from. Detection has to
+    /// finish and find at least as many devices as there were before sleep.
+    /// </summary>
+    bool RescanServer(int devicesBefore, out string what)
+    {
+        if (!_hub.IsConnected) _hub.Connect(force: true);
+
+        if (!_hub.CanRescan)
+        {
+            what = Loc.P("OpenRGB не поддерживает пересканирование, нужна версия 1.0 или новее",
+                         "OpenRGB cannot rescan, version 1.0 or later is needed");
+            return false;
+        }
+
+        if (!_hub.Rescan())
+        {
+            what = Loc.P("поиск устройств не завершился", "device detection did not finish");
+            return false;
+        }
+
+        bool found = WaitForDevices(20) && _hub.Devices.Length >= devicesBefore;
+
+        what = found
+            ? Loc.P("устройства найдены заново", "the devices were found again")
+            : string.Format(Loc.P("после поиска найдено устройств: {0} из {1}", "devices found after detection: {0} of {1}"),
+                            _hub.Devices.Length, devicesBefore);
+        return found;
+    }
+
+    /// <returns>What happened, ready for the status line.</returns>
+    string RestartServer()
+    {
+        // The connection goes first: a restart would otherwise be writing into a dying
+        // process.
+        _hub.Dispose();
+
+        return OpenRgbLauncher.Restart(
+            string.IsNullOrWhiteSpace(_scene.OpenRgbPath) ? null : _scene.OpenRgbPath,
+            _scene.OpenRgbAsAdmin);
     }
 
     void SetupTray()
@@ -1928,13 +1985,21 @@ public sealed partial class MainWindow : Window
     bool WaitForDevices(int attempts = 90)
     {
         int last = -1, stable = 0;
+        long since = Environment.TickCount64;
 
         for (int i = 0; i < attempts; i++)
         {
+            // taken before the read, so a detection that ends during it is not missed
+            bool detectionEnded = _hub.LastDetectionEndTicks >= since;
+
             if (!_hub.IsConnected) _hub.Connect(force: true);
             else _hub.Refresh();
 
             int count = _hub.Devices.Length;
+
+            // A server on protocol 6 says when detection is over, and a list read after
+            // that is the whole list.
+            if (detectionEnded && count > 0) return true;
 
             // Not "any device", but "the same devices twice running": detection hands the
             // list over in pieces, and returning at the first one binds the layout to

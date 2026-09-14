@@ -22,6 +22,7 @@ static class Program
 
         if (mode is "help" or "-h" or "--help") { Usage(); return 0; }
         if (mode == "api") { DumpApi(); return 0; }
+        if (mode == "rescan") return Rescan();
 
         OpenRgbClient client;
         try
@@ -62,8 +63,33 @@ static class Program
         Console.WriteLine("  walk   <устр> <зона> [мс]     бегущий огонёк по зоне");
         Console.WriteLine("  fill   <устр> <r> <g> <b>     залить всё устройство одним цветом");
         Console.WriteLine("  off    [устр]                 погасить (без номера - все)");
+        Console.WriteLine("  rescan                        пересканировать устройства и дождаться конца поиска (OpenRGB 1.0+)");
         Console.WriteLine();
         Console.WriteLine("Номера устройств и зон - из вывода list.");
+    }
+
+    /// <summary>
+    /// The wake recovery's rescan on its own, through the very class the program uses, so
+    /// the request and the wait for detection can be checked without sleeping the machine.
+    /// </summary>
+    static int Rescan()
+    {
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+        using var channel = new CaseLight.Rgb.DetectionChannel();
+
+        if (!channel.Connect())
+        {
+            Console.WriteLine(channel.IsConnected
+                ? "Сервер ответил протоколом ниже 6: пересканирование не поддерживается."
+                : "Не удалось подключиться к OpenRGB на 127.0.0.1:6742.");
+            return 1;
+        }
+
+        Console.WriteLine($"{clock.ElapsedMilliseconds,6} мс  подключено, протокол 6");
+
+        bool done = channel.RescanAndWait(5000, 60000);
+        Console.WriteLine($"{clock.ElapsedMilliseconds,6} мс  " + (done ? "поиск устройств завершён" : "поиск не завершился"));
+        return done ? 0 : 1;
     }
 
     // ---- чтение ----------------------------------------------------------

@@ -67,17 +67,23 @@ public enum WakeRecovery
     Nothing,
 
     /// <summary>
-    /// Ask the server to look for hardware again.
+    /// Ask the server to look for hardware again, without restarting it.
     ///
-    /// Kept only so that settings written earlier still load; the program treats it as a
-    /// restart. The request kills the server outright on this hardware - three times out
-    /// of three, with the client disconnected beforehand, so it is not a matter of who is
-    /// holding the device list.
+    /// OpenRGB 1.0 deletes every controller on this request and detects them afresh, and it
+    /// survived that with frames still being written. 0.9 died on the same request three
+    /// times out of three, so the rescan is only sent to a server on protocol 6, the version
+    /// that also announces the end of detection; an older one is left as it is.
     /// </summary>
     Rescan,
 
     /// <summary>Close the server and start it fresh. Blunt and reliable.</summary>
-    RestartServer
+    RestartServer,
+
+    /// <summary>
+    /// Rescan, and restart the server if that did not bring the devices back: no protocol 6,
+    /// no end of detection in time, or fewer devices than before sleep.
+    /// </summary>
+    RescanThenRestart
 }
 
 /// <summary>Shape of the movable test patch used to check placement.</summary>
@@ -350,10 +356,10 @@ public sealed class Scene
     ///
     /// It began as a guard for our own writes: OpenRGB was seen dying 41 seconds after a
     /// resume with an access violation, because its USB devices are re-enumerated while it
-    /// still holds the old handles. With the server now restarted rather than kept, that
-    /// job has moved - the pause holds the restart back instead, because a server that
-    /// goes looking for hardware over a bus that is still settling comes back with half a
-    /// device list, or does not come back at all.
+    /// still holds the old handles. With the server now rescanned or restarted rather than
+    /// kept, that job has moved - the pause holds the rescan or restart back instead,
+    /// because a server that goes looking for hardware over a bus that is still settling
+    /// comes back with half a device list, or does not come back at all.
     ///
     /// In <see cref="WakeRecovery.Nothing"/> it keeps its original meaning, since there
     /// the old server carries on with the handles it had.
