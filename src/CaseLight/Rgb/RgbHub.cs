@@ -24,11 +24,15 @@ public sealed record DeviceInfo(int Index, string Name, string Location, string 
 /// resolved by name and re-resolved after every reconnect. And the server itself dies:
 /// three access violations in ten minutes during calibration, so a dropped connection is
 /// an expected state rather than an error.
+///
+/// A server on protocol 6 is spoken to only through <see cref="ServerChannel"/>: the list,
+/// direct mode and frames, all by controller id and with every wait limited. The client
+/// library is connected all the same and serves servers older than OpenRGB 1.0, which is
+/// why the connection state below still follows it.
 /// </summary>
 public sealed class RgbHub : IDisposable
 {
     OpenRgbClient? _client;
-    Device[] _devices = Array.Empty<Device>();
 
     /// <summary>
     /// One socket, one writer at a time.
@@ -47,7 +51,7 @@ public sealed class RgbHub : IDisposable
     long _lastAttempt;
 
     /// <summary>
-    /// Set from the client's own thread when OpenRGB announces that its device list moved.
+    /// Set when OpenRGB announces that its device list moved.
     ///
     /// This is what keeps us from writing an array of the wrong length: UpdateLeds carries
     /// exactly as many colours as we last saw, and a zone resized on the server's side
@@ -55,6 +59,25 @@ public sealed class RgbHub : IDisposable
     /// with 0xc0000409 in ucrtbase.
     /// </summary>
     volatile bool _listStale;
+
+    /// <summary>
+    /// Raised together with <see cref="_listStale"/>. A changed list may hold controllers
+    /// that are new objects on the server - after a rescan every one of them is - and those
+    /// come up in their default mode, so <see cref="_directMode"/> no longer describes them.
+    /// </summary>
+    volatile bool _modesStale;
+
+    /// <summary>The protocol 6 connection. Made before the list is read and dropped with the main one.</summary>
+    readonly ServerChannel _server = new();
+
+    /// <summary>
+    /// Controller ids by server index, from the last read of the list over protocol 6; null
+    /// when the list came through the library. Touched only under <see cref="_io"/>.
+    /// </summary>
+    uint[]? _ids;
+
+    /// <summary>The channel's counters at the last look; a change means the list has to be read again.</summary>
+    int _refusedSeen, _listChangesSeen;
 
     /// <summary>
     /// Bumped on every re-read of the controller list. Anything caching resolved indices
@@ -112,24 +135,38 @@ public sealed class RgbHub : IDisposable
             lock (_io)
             {
                 _client?.Dispose();
-                _client = new OpenRgbClient(name: "CaseLight");
-                _client.DeviceListUpdated += (_, _) => _listStale = true;
+                _client = new OpenRgbClient(name: "CaseLight (protocol 4)");
+                _client.DeviceListUpdated += (_, _) => { _listStale = true; _modesStale = true; };
                 _listStale = false;
+                _modesStale = false;
                 _directMode.Clear();
+
+                // после основного: отказ в подключении не должен стоить ожидания версии
+                ConnectServer();
                 RefreshLocked();
             }
         }
         catch (Exception ex)
         {
             _client = null;
-            _devices = Array.Empty<Device>();
             Devices = Array.Empty<DeviceInfo>();
+            _ids = null;
+            _server.Dispose();
             Report(State.NoConnection, ex.Message);
             return false;
         }
 
         Report(State.Connected);
         return true;
+    }
+
+    void ConnectServer()
+    {
+        try { _server.Connect(); }
+        catch { /* без канала всё идёт через библиотеку, как раньше */ }
+
+        _refusedSeen = 0;
+        _listChangesSeen = 0;
     }
 
     /// <summary>
@@ -192,8 +229,9 @@ public sealed class RgbHub : IDisposable
 
         try { _client?.Dispose(); } catch { /* уже мёртв */ }
         _client = null;
+        _server.Dispose();
+        _ids = null;
 
-        _devices = Array.Empty<Device>();
         Devices = Array.Empty<DeviceInfo>();
         _directMode.Clear();
         Generation++;
@@ -212,26 +250,22 @@ public sealed class RgbHub : IDisposable
     {
         if (_client == null) return;
 
-        _devices = _client.GetAllControllerData();
-
-        var list = new List<DeviceInfo>();
-        for (int i = 0; i < _devices.Length; i++)
+        // сбрасывается до чтения: поиск, закончившийся во время него, поднимет флаг снова
+        if (_modesStale)
         {
-            var d = _devices[i];
-            if (d.Leds.Length == 0) continue;   // empty stubs are not worth showing
-
-            var zones = new List<ZoneInfo>();
-            int running = 0;
-            for (int z = 0; z < d.Zones.Length; z++)
-            {
-                zones.Add(new ZoneInfo(z, d.Zones[z].Name, (int)d.Zones[z].LedCount, running));
-                running += (int)d.Zones[z].LedCount;
-            }
-
-            list.Add(new DeviceInfo(i, d.Name, d.Location, d.Type.ToString(), d.Leds.Length, zones.ToArray()));
+            _modesStale = false;
+            _directMode.Clear();
         }
 
-        Devices = list.ToArray();
+        if (_server.Supported)
+        {
+            if (!ReadListByIdLocked()) return;
+        }
+        else
+        {
+            ReadListByIndexLocked();
+        }
+
         Generation++;
 
         // Status is what the window shows, and it used to be written only when the
@@ -247,46 +281,178 @@ public sealed class RgbHub : IDisposable
             string key = info.Index + "|" + info.Name + "|" + info.Location;
             if (!_directMode.Add(key)) continue;
 
+            if (_ids != null)
+            {
+                _server.SetCustomMode(_ids[info.Index]);
+                continue;
+            }
+
             try { _client.SetCustomMode(info.Index); }
             catch { /* одно упрямое устройство не должно ронять остальные */ }
         }
     }
 
     /// <summary>
-    /// Asks the server to look for hardware again, over a socket of our own.
+    /// The list over protocol 6, by id, each request with a limited wait.
     ///
-    /// The client library has no such call, but the protocol does: a bare 16-byte header
-    /// with packet id 140. Kept for the record rather than for use: on this machine the
-    /// request kills the server every time, and disconnecting first changes nothing, so
-    /// the recovery path restarts the server instead.
+    /// A controller that does not answer has gone between the count and its description -
+    /// a rescan deletes them all - so the read is abandoned and the list kept as it was.
+    /// The server announces the change, and that brings the next read.
     /// </summary>
-    public static string RequestRescan(string host = "127.0.0.1", int port = 6742)
+    /// <returns>False if the read was abandoned.</returns>
+    bool ReadListByIdLocked()
     {
-        try
+        uint[]? ids = _server.RequestControllerIds();
+        if (ids == null)
         {
-            using var socket = new System.Net.Sockets.TcpClient();
-            socket.Connect(host, port);
-
-            using var stream = socket.GetStream();
-
-            var packet = new byte[16];
-            packet[0] = (byte)'O'; packet[1] = (byte)'R'; packet[2] = (byte)'G'; packet[3] = (byte)'B';
-            // device index 0, size 0 - both already zero
-            BitConverter.GetBytes(140u).CopyTo(packet, 8);   // REQUEST_RESCAN_DEVICES
-
-            stream.Write(packet, 0, packet.Length);
-            stream.Flush();
-
-            // give the server a moment to pick the request up before the socket closes
-            System.Threading.Thread.Sleep(300);
-
-            ProbeLog.Log("OpenRGB", Loc.P("запрошено пересканирование устройств", "a device rescan was requested"));
-            return Loc.P("запрошено пересканирование устройств", "a device rescan was requested");
+            _listStale = true;
+            return false;
         }
-        catch (Exception ex)
+
+        var list = new List<DeviceInfo>();
+        for (int i = 0; i < ids.Length; i++)
         {
-            ProbeLog.Log("OpenRGB", Loc.P("пересканирование не удалось: ", "the rescan failed: ") + ex.Message);
-            return Loc.P("пересканирование не удалось: ", "the rescan failed: ") + ex.Message;
+            var d = _server.RequestController(ids[i]);
+            if (d == null)
+            {
+                _listStale = true;
+                return false;
+            }
+
+            if (d.LedCount == 0) continue;   // empty stubs are not worth showing
+
+            var zones = new ZoneInfo[d.Zones.Length];
+            int running = 0;
+            for (int z = 0; z < zones.Length; z++)
+            {
+                zones[z] = new ZoneInfo(z, d.Zones[z].Name, d.Zones[z].LedCount, running);
+                running += d.Zones[z].LedCount;
+            }
+
+            // the library's names for device types, so the window shows the same words either way
+            list.Add(new DeviceInfo(i, d.Name, d.Location, ((DeviceType)d.Type).ToString(), d.LedCount, zones));
+        }
+
+        _ids = ids;
+        Devices = list.ToArray();
+        return true;
+    }
+
+    /// <summary>The list through the client library, for servers older than protocol 6.</summary>
+    void ReadListByIndexLocked()
+    {
+        var devices = _client!.GetAllControllerData();
+
+        var list = new List<DeviceInfo>();
+        for (int i = 0; i < devices.Length; i++)
+        {
+            var d = devices[i];
+            if (d.Leds.Length == 0) continue;   // empty stubs are not worth showing
+
+            var zones = new List<ZoneInfo>();
+            int running = 0;
+            for (int z = 0; z < d.Zones.Length; z++)
+            {
+                zones.Add(new ZoneInfo(z, d.Zones[z].Name, (int)d.Zones[z].LedCount, running));
+                running += (int)d.Zones[z].LedCount;
+            }
+
+            list.Add(new DeviceInfo(i, d.Name, d.Location, d.Type.ToString(), d.Leds.Length, zones.ToArray()));
+        }
+
+        _ids = null;
+        Devices = list.ToArray();
+    }
+
+    /// <summary>Whether the server takes rescan requests; see <see cref="ServerChannel"/>.</summary>
+    public bool CanRescan
+    {
+        get
+        {
+            if (!_server.IsConnected && IsConnected)
+            {
+                ConnectServer();
+
+                // the list comes over the channel with the next read
+                _listStale = true;
+            }
+
+            return _server.Supported;
+        }
+    }
+
+    /// <summary>When the server last said detection was over; 0 if it never did on this connection.</summary>
+    public long LastDetectionEndTicks => _server.LastCompletedTicks;
+
+    /// <summary>
+    /// Asks the server to find its devices again and returns as soon as
+    /// <paramref name="wanted"/> of them are back in the list, detection finished or not.
+    ///
+    /// After sleep the board was in the list a second into the rescan, while detection went
+    /// on for eight more looking for hardware this machine does not have. The server
+    /// announces every change of its list, so each announcement is read at once.
+    ///
+    /// The controllers come back as new objects with new ids, in whatever mode they default
+    /// to, so direct mode is renewed on every read, and the list is left marked for one more
+    /// read after detection ends in case it found something after we stopped looking.
+    /// </summary>
+    /// <returns>False if detection did not begin, ended short, or ran out of time.</returns>
+    public bool Rescan(int wanted, int startTimeoutMs = 5000, int timeoutMs = 60000)
+    {
+        if (!CanRescan) return false;
+
+        int changes = _server.ListChanges;
+        int completed = _server.CompletedDetections;
+        long deadline = Environment.TickCount64 + timeoutMs;
+
+        bool started = _server.StartRescan(startTimeoutMs);
+        _modesStale = true;
+        _listStale = true;
+
+        if (!started)
+        {
+            ProbeLog.Log("OpenRGB", Loc.P("пересканирование не началось", "the rescan did not start"));
+            return false;
+        }
+
+        while (true)
+        {
+            int nowChanges = _server.ListChanges;
+            int nowCompleted = _server.CompletedDetections;
+
+            if (nowChanges != changes || nowCompleted != completed)
+            {
+                bool ended = nowCompleted != completed;
+                changes = nowChanges;
+                completed = nowCompleted;
+
+                _listChangesSeen = nowChanges;
+                _modesStale = true;
+                Refresh();
+
+                if (Devices.Length >= wanted)
+                {
+                    ProbeLog.Log("OpenRGB", ended
+                        ? Loc.P("пересканирование завершено", "the rescan is complete")
+                        : Loc.P("устройства вернулись, поиск ещё идёт", "the devices are back, detection goes on"));
+                    return true;
+                }
+
+                if (ended)
+                {
+                    ProbeLog.Log("OpenRGB", Loc.P("поиск закончился, не найдя всех устройств", "detection ended without finding every device"));
+                    return false;
+                }
+            }
+
+            long left = deadline - Environment.TickCount64;
+            if (left <= 0 || !_server.IsConnected)
+            {
+                ProbeLog.Log("OpenRGB", Loc.P("пересканирование не завершилось", "the rescan did not complete"));
+                return false;
+            }
+
+            _server.WaitForNews(nowChanges, nowCompleted, (int)Math.Min(left, 1000));
         }
     }
 
@@ -296,7 +462,20 @@ public sealed class RgbHub : IDisposable
     /// </summary>
     public bool RefreshIfStale()
     {
+        int changes = _server.ListChanges;
+        if (changes != _listChangesSeen)
+        {
+            _listChangesSeen = changes;
+            _listStale = true;
+            _modesStale = true;
+        }
+
         if (!_listStale || _client == null) return false;
+
+        // A detection changes the list more than once on its way - empty first, then filling
+        // up - so the read waits for its end; frames meanwhile go to ids the server may
+        // refuse, which costs nothing.
+        if (_server.DetectionRunning) return false;
 
         _listStale = false;
         try { Refresh(); }
@@ -417,16 +596,26 @@ public sealed class RgbHub : IDisposable
                     // the list can be re-read between frames, leaving our buffer a size behind
                     if (buf.r.Length != info.LedCount) continue;
 
-                    var colors = new Color[info.LedCount];
+                    var rgb = new byte[info.LedCount * 3];
                     for (int i = 0; i < info.LedCount; i++)
                     {
                         int hits = buf.hits[i];
-                        colors[i] = hits == 0
-                            ? new Color(0, 0, 0)
-                            : new Color((byte)(buf.r[i] / hits), (byte)(buf.g[i] / hits), (byte)(buf.b[i] / hits));
+                        if (hits == 0) continue;
+
+                        rgb[i * 3] = (byte)(buf.r[i] / hits);
+                        rgb[i * 3 + 1] = (byte)(buf.g[i] / hits);
+                        rgb[i * 3 + 2] = (byte)(buf.b[i] / hits);
                     }
 
-                    _client.UpdateLeds(info.Index, colors);
+                    WriteLocked(info, rgb);
+                }
+
+                // a refused id means the list moved without our noticing; read it again
+                int refused = _server.InvalidIdAcks;
+                if (refused != _refusedSeen)
+                {
+                    _refusedSeen = refused;
+                    _listStale = true;
                 }
             }
         }
@@ -437,11 +626,37 @@ public sealed class RgbHub : IDisposable
             {
                 try { _client?.Dispose(); } catch { /* уже мёртв */ }
                 _client = null;
+                _ids = null;
             }
+            _server.Dispose();
             return false;
         }
 
         return true;
+    }
+
+    /// <summary>
+    /// Puts one array on one device: by id when the list came over protocol 6, through the
+    /// library otherwise. Call under <see cref="_io"/>.
+    /// </summary>
+    /// <param name="rgb">Three bytes per LED.</param>
+    void WriteLocked(DeviceInfo info, byte[] rgb)
+    {
+        var ids = _ids;
+        if (ids != null)
+        {
+            // Through the library this would be dropped by the server without a word, so a
+            // failed send is left as it is: the channel is gone, and the reconnect that
+            // follows reads the list afresh.
+            if (info.Index < ids.Length) _server.UpdateLeds(ids[info.Index], rgb, info.LedCount);
+            return;
+        }
+
+        var colors = new Color[info.LedCount];
+        for (int i = 0; i < colors.Length; i++)
+            colors[i] = new Color(rgb[i * 3], rgb[i * 3 + 1], rgb[i * 3 + 2]);
+
+        _client!.UpdateLeds(info.Index, colors);
     }
 
     /// <summary>Lights one fixture and blacks out everything else - used to identify it in the case.</summary>
@@ -479,12 +694,7 @@ public sealed class RgbHub : IDisposable
                 if (_client == null) return false;
 
                 foreach (var info in Devices)
-                {
-                    var colors = new Color[info.LedCount];
-                    for (int i = 0; i < colors.Length; i++) colors[i] = new Color(0, 0, 0);
-
-                    _client.UpdateLeds(info.Index, colors);
-                }
+                    WriteLocked(info, new byte[info.LedCount * 3]);
             }
         }
         catch (Exception ex)
@@ -524,11 +734,7 @@ public sealed class RgbHub : IDisposable
                 foreach (var info in Devices)
                 {
                     if (driven.Contains(info.Index)) continue;
-
-                    var colors = new Color[info.LedCount];
-                    for (int i = 0; i < colors.Length; i++) colors[i] = new Color(0, 0, 0);
-
-                    _client.UpdateLeds(info.Index, colors);
+                    WriteLocked(info, new byte[info.LedCount * 3]);
                 }
             }
         }
@@ -547,10 +753,12 @@ public sealed class RgbHub : IDisposable
         {
             try { _client?.Dispose(); } catch { /* уже отвалилось */ }
             _client = null;
+            _ids = null;
         }
 
+        _server.Dispose();
+
         // stale names in the interface are worse than an honest empty list
-        _devices = Array.Empty<Device>();
         Devices = Array.Empty<DeviceInfo>();
         _directMode.Clear();
         Generation++;

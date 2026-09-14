@@ -132,11 +132,17 @@ session, and no UAC prompt appears at login.
 The lighting is blanked on exit, on session lock, on suspend and when the display is turned
 off. Each of the four cases is configured separately.
 
-After a wake, writing to the devices is postponed. The controllers are re-enumerated on the
-USB bus, OpenRGB keeps writing to the previous descriptors and returns success, and the
-lighting stays in the state it was put into when power was applied. By default the server
-is restarted and the first write happens 8 seconds later. Both values are configurable; a
-device rescan is available instead of a restart, but OpenRGB sometimes crashes during it.
+On a wake the controllers are re-enumerated on the USB bus, OpenRGB keeps writing to the
+previous descriptors and returns success, and the lighting stays in the state it was put
+into when power was applied. The devices are therefore opened anew after a wake. With
+OpenRGB 1.0 or later CaseLight rescans the devices without restarting the server and
+restarts it only if some were not found. With earlier versions the server is restarted
+straight away. What to do after a wake and the pause before it are set in the settings.
+
+Device detection in OpenRGB gets noticeably faster when the devices that are not in the
+system are switched off in its list of supported devices. After sleep, detection with every
+detector enabled took 9 seconds; with the motherboard detector alone the lighting comes
+back together with the picture on the monitor.
 
 ## Files
 

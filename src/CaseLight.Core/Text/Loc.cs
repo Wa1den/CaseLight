@@ -20,7 +20,7 @@ public static class Loc
     /// silently shadowed newly reworded labels, so a mismatched version rewrites it. Only
     /// the two built-in files are rewritten; added languages are left alone.
     /// </summary>
-    const string Version = "12";
+    const string Version = "15";
 
     /// <summary>
     /// Bookkeeping entries rather than translated text: the version a file was written
@@ -369,12 +369,14 @@ public static class Loc
         ["power.off.sleep"] = "при уходе в сон",
         ["power.wake"] = "После пробуждения",
         ["power.wake.nothing"] = "Ничего не делать",
+        ["power.wake.rescan"] = "Пересканировать устройства",
+        ["power.wake.rescanrestart"] = "Пересканировать, при неудаче перезапустить",
         ["power.wake.restart"] = "Перезапустить OpenRGB",
         ["power.wake.what"] = "Что делать",
-        ["power.wake.note"] = "Во сне контроллеры переподключаются к USB, а работавший сервер продолжает запись в прежние дескрипторы и возвращает признак успеха: подсветка при этом остаётся в состоянии, установленном при подаче питания. Перезапуск возвращает управление.",
+        ["power.wake.note"] = "Пересканирование работает только с OpenRGB 1.0 и новее, с более ранними версиями нужен перезапуск.",
         ["power.restartnow"] = "Перезапустить OpenRGB сейчас",
         ["power.delay"] = "Пауза после пробуждения",
-        ["power.delay.note"] = "Сколько не трогать подсветку после выхода из сна. При перезапуске пауза откладывает сам перезапуск: контроллеры в это время переподключаются к USB, а поиск устройств по неустоявшейся шине даёт неполный список. В режиме «Ничего не делать» пауза откладывает первую запись, потому что сервер продолжает работать с прежними дескрипторами.",
+        ["power.delay.note"] = "Сколько не трогать подсветку после выхода из сна. При пересканировании и перезапуске пауза откладывает их: контроллеры в это время переподключаются к USB, и поиск по неустоявшейся шине может найти не все устройства. С OpenRGB 1.0 паузу можно не ставить: если устройств нашлось меньше, чем было до сна, поиск повторяется. Со старыми версиями перед перезапуском выдерживается не меньше 2 с. В режиме «Ничего не делать» пауза откладывает первую запись, потому что сервер продолжает работать с прежними дескрипторами.",
 
         ["about.text"] = "Подсветка внутри корпуса воспроизводит изображение с экрана. Каждое светящееся устройство описывается там, где оно физически стоит, и получает цвет с ближайшего к нему участка экрана.",
         ["about.text2"] = "Управление идёт через OpenRGB: устройства на ARGB-контроллере и оперативная память на шине SMBus. Сервер запускается программой, если не запущен, и перезапускается после выхода из сна.",
@@ -608,12 +610,14 @@ public static class Loc
         ["power.off.sleep"] = "when the machine goes to sleep",
         ["power.wake"] = "After waking",
         ["power.wake.nothing"] = "Do nothing",
+        ["power.wake.rescan"] = "Rescan devices",
+        ["power.wake.rescanrestart"] = "Rescan, restart if that fails",
         ["power.wake.restart"] = "Restart OpenRGB",
         ["power.wake.what"] = "What to do",
-        ["power.wake.note"] = "During sleep the controllers reconnect over USB while the running server keeps writing to the old handles and reports success: the lighting stays as the power-on state left it. A restart gives control back.",
+        ["power.wake.note"] = "A rescan works only with OpenRGB 1.0 or later; earlier versions need a restart.",
         ["power.restartnow"] = "Restart OpenRGB now",
         ["power.delay"] = "Pause after waking",
-        ["power.delay.note"] = "How long the lighting is left alone after waking. With a restart the pause delays the restart itself: the controllers are reconnecting over USB at that moment, and a scan of an unsettled bus returns an incomplete list. In «do nothing» mode the pause delays the first write, because the server carries on with its old handles.",
+        ["power.delay.note"] = "How long the lighting is left alone after waking. With a rescan or a restart the pause delays it: the controllers are reconnecting over USB at that moment, and a scan of an unsettled bus may miss devices. With OpenRGB 1.0 the pause can stay at zero: if fewer devices are found than before sleep, the scan is repeated. With older versions at least 2 s pass before a restart. In «do nothing» mode the pause delays the first write, because the server carries on with its old handles.",
 
         ["about.text"] = "Lighting inside the case reproduces what is on the screen. Every lighting device is described where it physically stands and takes its colour from the nearest part of the screen.",
         ["about.text2"] = "Everything is driven through OpenRGB: devices on the ARGB controller and memory modules on the SMBus. The server is started by the program if it is not running, and restarted after waking.",
