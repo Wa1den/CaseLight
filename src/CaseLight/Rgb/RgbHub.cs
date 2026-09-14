@@ -25,15 +25,14 @@ public sealed record DeviceInfo(int Index, string Name, string Location, string 
 /// three access violations in ten minutes during calibration, so a dropped connection is
 /// an expected state rather than an error.
 ///
-/// It holds two connections. The client library reads the list and sets modes; frames go
-/// through <see cref="ServerChannel"/> by controller id wherever the server speaks
-/// protocol 6, because OpenRGB 1.0 drops protocol 4 frames once a rescan has changed the
-/// ids. An older server gets its frames through the library, as before.
+/// A server on protocol 6 is spoken to only through <see cref="ServerChannel"/>: the list,
+/// direct mode and frames, all by controller id and with every wait limited. The client
+/// library is connected all the same and serves servers older than OpenRGB 1.0, which is
+/// why the connection state below still follows it.
 /// </summary>
 public sealed class RgbHub : IDisposable
 {
     OpenRgbClient? _client;
-    Device[] _devices = Array.Empty<Device>();
 
     /// <summary>
     /// One socket, one writer at a time.
@@ -52,7 +51,7 @@ public sealed class RgbHub : IDisposable
     long _lastAttempt;
 
     /// <summary>
-    /// Set from the client's own thread when OpenRGB announces that its device list moved.
+    /// Set when OpenRGB announces that its device list moved.
     ///
     /// This is what keeps us from writing an array of the wrong length: UpdateLeds carries
     /// exactly as many colours as we last saw, and a zone resized on the server's side
@@ -68,20 +67,17 @@ public sealed class RgbHub : IDisposable
     /// </summary>
     volatile bool _modesStale;
 
-    /// <summary>
-    /// The protocol 6 connection: frames by id, rescans, the end of detection. Made before
-    /// the list is read, so the first read already has ids, and dropped with the main one.
-    /// </summary>
+    /// <summary>The protocol 6 connection. Made before the list is read and dropped with the main one.</summary>
     readonly ServerChannel _server = new();
 
     /// <summary>
-    /// Controller ids by server index, read right after the list; null where frames go
-    /// through the library instead. Touched only under <see cref="_io"/>.
+    /// Controller ids by server index, from the last read of the list over protocol 6; null
+    /// when the list came through the library. Touched only under <see cref="_io"/>.
     /// </summary>
     uint[]? _ids;
 
-    /// <summary>The server's count of refused frames at the last look; see <see cref="ServerChannel.InvalidIdAcks"/>.</summary>
-    int _refusedSeen;
+    /// <summary>The channel's counters at the last look; a change means the list has to be read again.</summary>
+    int _refusedSeen, _listChangesSeen;
 
     /// <summary>
     /// Bumped on every re-read of the controller list. Anything caching resolved indices
@@ -139,7 +135,7 @@ public sealed class RgbHub : IDisposable
             lock (_io)
             {
                 _client?.Dispose();
-                _client = new OpenRgbClient(name: "CaseLight");
+                _client = new OpenRgbClient(name: "CaseLight (protocol 4)");
                 _client.DeviceListUpdated += (_, _) => { _listStale = true; _modesStale = true; };
                 _listStale = false;
                 _modesStale = false;
@@ -153,7 +149,6 @@ public sealed class RgbHub : IDisposable
         catch (Exception ex)
         {
             _client = null;
-            _devices = Array.Empty<Device>();
             Devices = Array.Empty<DeviceInfo>();
             _ids = null;
             _server.Dispose();
@@ -168,9 +163,10 @@ public sealed class RgbHub : IDisposable
     void ConnectServer()
     {
         try { _server.Connect(); }
-        catch { /* без канала кадры идут через библиотеку, как раньше */ }
+        catch { /* без канала всё идёт через библиотеку, как раньше */ }
 
         _refusedSeen = 0;
+        _listChangesSeen = 0;
     }
 
     /// <summary>
@@ -236,7 +232,6 @@ public sealed class RgbHub : IDisposable
         _server.Dispose();
         _ids = null;
 
-        _devices = Array.Empty<Device>();
         Devices = Array.Empty<DeviceInfo>();
         _directMode.Clear();
         Generation++;
@@ -262,18 +257,96 @@ public sealed class RgbHub : IDisposable
             _directMode.Clear();
         }
 
-        _devices = _client.GetAllControllerData();
+        if (_server.Supported)
+        {
+            if (!ReadListByIdLocked()) return;
+        }
+        else
+        {
+            ReadListByIndexLocked();
+        }
 
-        // Read right after the list, so both describe the same moment. A count that does
-        // not match means the list moved in between; the announcement of that move brings
-        // another read, and until then frames go through the library.
+        Generation++;
+
+        // Status is what the window shows, and it used to be written only when the
+        // connection was made - so a list that filled up afterwards left the line saying
+        // "0 controllers" over a case that was lit and working.
+        Report(State.Connected);
+
+        // Per-LED control has to be re-established after every reconnect: a restarted
+        // server brings its devices back in whatever mode they defaulted to. Only devices
+        // that have not had it yet are touched - see _directMode.
+        foreach (var info in Devices)
+        {
+            string key = info.Index + "|" + info.Name + "|" + info.Location;
+            if (!_directMode.Add(key)) continue;
+
+            if (_ids != null)
+            {
+                _server.SetCustomMode(_ids[info.Index]);
+                continue;
+            }
+
+            try { _client.SetCustomMode(info.Index); }
+            catch { /* одно упрямое устройство не должно ронять остальные */ }
+        }
+    }
+
+    /// <summary>
+    /// The list over protocol 6, by id, each request with a limited wait.
+    ///
+    /// A controller that does not answer has gone between the count and its description -
+    /// a rescan deletes them all - so the read is abandoned and the list kept as it was.
+    /// The server announces the change, and that brings the next read.
+    /// </summary>
+    /// <returns>False if the read was abandoned.</returns>
+    bool ReadListByIdLocked()
+    {
         uint[]? ids = _server.RequestControllerIds();
-        _ids = ids != null && ids.Length == _devices.Length ? ids : null;
+        if (ids == null)
+        {
+            _listStale = true;
+            return false;
+        }
 
         var list = new List<DeviceInfo>();
-        for (int i = 0; i < _devices.Length; i++)
+        for (int i = 0; i < ids.Length; i++)
         {
-            var d = _devices[i];
+            var d = _server.RequestController(ids[i]);
+            if (d == null)
+            {
+                _listStale = true;
+                return false;
+            }
+
+            if (d.LedCount == 0) continue;   // empty stubs are not worth showing
+
+            var zones = new ZoneInfo[d.Zones.Length];
+            int running = 0;
+            for (int z = 0; z < zones.Length; z++)
+            {
+                zones[z] = new ZoneInfo(z, d.Zones[z].Name, d.Zones[z].LedCount, running);
+                running += d.Zones[z].LedCount;
+            }
+
+            // the library's names for device types, so the window shows the same words either way
+            list.Add(new DeviceInfo(i, d.Name, d.Location, ((DeviceType)d.Type).ToString(), d.LedCount, zones));
+        }
+
+        _ids = ids;
+        Devices = list.ToArray();
+        return true;
+    }
+
+    /// <summary>The list through the client library, for servers older than protocol 6.</summary>
+    void ReadListByIndexLocked()
+    {
+        var devices = _client!.GetAllControllerData();
+
+        var list = new List<DeviceInfo>();
+        for (int i = 0; i < devices.Length; i++)
+        {
+            var d = devices[i];
             if (d.Leds.Length == 0) continue;   // empty stubs are not worth showing
 
             var zones = new List<ZoneInfo>();
@@ -287,26 +360,8 @@ public sealed class RgbHub : IDisposable
             list.Add(new DeviceInfo(i, d.Name, d.Location, d.Type.ToString(), d.Leds.Length, zones.ToArray()));
         }
 
+        _ids = null;
         Devices = list.ToArray();
-        Generation++;
-
-        // Status is what the window shows, and it used to be written only when the
-        // connection was made - so a list that filled up afterwards left the line saying
-        // "0 controllers" over a case that was lit and working.
-        Report(State.Connected);
-
-        // Per-LED control has to be re-established after every reconnect: a restarted
-        // server brings its devices back in whatever mode they defaulted to. Only devices
-        // that have not had it yet are touched - see _directMode. The mode is set by list
-        // index, which the server resolves on the spot and gets right after a rescan too.
-        foreach (var info in Devices)
-        {
-            string key = info.Index + "|" + info.Name + "|" + info.Location;
-            if (!_directMode.Add(key)) continue;
-
-            try { _client.SetCustomMode(info.Index); }
-            catch { /* одно упрямое устройство не должно ронять остальные */ }
-        }
     }
 
     /// <summary>Whether the server takes rescan requests; see <see cref="ServerChannel"/>.</summary>
@@ -318,7 +373,7 @@ public sealed class RgbHub : IDisposable
             {
                 ConnectServer();
 
-                // ids come with the next read of the list
+                // the list comes over the channel with the next read
                 _listStale = true;
             }
 
@@ -357,7 +412,20 @@ public sealed class RgbHub : IDisposable
     /// </summary>
     public bool RefreshIfStale()
     {
+        int changes = _server.ListChanges;
+        if (changes != _listChangesSeen)
+        {
+            _listChangesSeen = changes;
+            _listStale = true;
+            _modesStale = true;
+        }
+
         if (!_listStale || _client == null) return false;
+
+        // A detection changes the list more than once on its way - empty first, then filling
+        // up - so the read waits for its end; frames meanwhile go to ids the server may
+        // refuse, which costs nothing.
+        if (_server.DetectionRunning) return false;
 
         _listStale = false;
         try { Refresh(); }
@@ -518,15 +586,21 @@ public sealed class RgbHub : IDisposable
     }
 
     /// <summary>
-    /// Puts one array on one device: by id over protocol 6 when the ids are known, through
-    /// the library otherwise. Call under <see cref="_io"/>.
+    /// Puts one array on one device: by id when the list came over protocol 6, through the
+    /// library otherwise. Call under <see cref="_io"/>.
     /// </summary>
     /// <param name="rgb">Three bytes per LED.</param>
     void WriteLocked(DeviceInfo info, byte[] rgb)
     {
         var ids = _ids;
-        if (ids != null && info.Index < ids.Length && _server.UpdateLeds(ids[info.Index], rgb, info.LedCount))
+        if (ids != null)
+        {
+            // Through the library this would be dropped by the server without a word, so a
+            // failed send is left as it is: the channel is gone, and the reconnect that
+            // follows reads the list afresh.
+            if (info.Index < ids.Length) _server.UpdateLeds(ids[info.Index], rgb, info.LedCount);
             return;
+        }
 
         var colors = new Color[info.LedCount];
         for (int i = 0; i < colors.Length; i++)
@@ -635,7 +709,6 @@ public sealed class RgbHub : IDisposable
         _server.Dispose();
 
         // stale names in the interface are worse than an honest empty list
-        _devices = Array.Empty<Device>();
         Devices = Array.Empty<DeviceInfo>();
         _directMode.Clear();
         Generation++;

@@ -23,6 +23,7 @@ static class Program
         if (mode is "help" or "-h" or "--help") { Usage(); return 0; }
         if (mode == "api") { DumpApi(); return 0; }
         if (mode == "rescan") return Rescan();
+        if (mode == "list6") return List6();
 
         OpenRgbClient client;
         try
@@ -64,8 +65,52 @@ static class Program
         Console.WriteLine("  fill   <устр> <r> <g> <b>     залить всё устройство одним цветом");
         Console.WriteLine("  off    [устр]                 погасить (без номера - все)");
         Console.WriteLine("  rescan                        пересканировать устройства и дождаться конца поиска (OpenRGB 1.0+)");
+        Console.WriteLine("  list6                         что видит сервер, по протоколу 6 и тем же разбором, что в программе");
         Console.WriteLine();
         Console.WriteLine("Номера устройств и зон - из вывода list.");
+    }
+
+    /// <summary>
+    /// The device list as the program reads it from a protocol 6 server. A description that
+    /// does not parse to its exact length shows up here as unreadable, which is how the
+    /// parser is checked against a real server.
+    /// </summary>
+    static int List6()
+    {
+        using var channel = new CaseLight.Rgb.ServerChannel();
+
+        if (!channel.Connect())
+        {
+            Console.WriteLine(channel.IsConnected
+                ? "Сервер ответил протоколом ниже 6."
+                : "Не удалось подключиться к OpenRGB на 127.0.0.1:6742.");
+            return 1;
+        }
+
+        var ids = channel.RequestControllerIds();
+        if (ids == null) { Console.WriteLine("Сервер не ответил на запрос списка."); return 1; }
+
+        Console.WriteLine($"Контроллеров: {ids.Length}");
+        int bad = 0;
+
+        foreach (uint id in ids)
+        {
+            var d = channel.RequestController(id);
+            if (d == null)
+            {
+                Console.WriteLine($"=== id {id}: описание не пришло или не разобралось");
+                bad++;
+                continue;
+            }
+
+            Console.WriteLine($"=== id {id}: {d.Name}");
+            Console.WriteLine($"    тип: {d.Type}, диодов: {d.LedCount}");
+            Console.WriteLine($"    расположение: {d.Location}");
+            for (int z = 0; z < d.Zones.Length; z++)
+                Console.WriteLine($"      [{z}] {d.Zones[z].Name,-24} диодов={d.Zones[z].LedCount,4}");
+        }
+
+        return bad == 0 ? 0 : 1;
     }
 
     /// <summary>

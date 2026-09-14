@@ -5,22 +5,28 @@ using System.Threading;
 
 namespace CaseLight.Rgb;
 
+/// <summary>One zone of a controller, from its protocol 6 description.</summary>
+public sealed record ControllerZone(string Name, int LedCount);
+
+/// <summary>The parts of a controller's protocol 6 description the program uses.</summary>
+public sealed record ControllerDescription(uint Id, int Type, string Name, string Location, int LedCount, ControllerZone[] Zones);
+
 /// <summary>
-/// A second connection to the OpenRGB server, on protocol 6: frames by controller id,
-/// rescans, and the start and end of detection.
+/// A connection to the OpenRGB server on protocol 6: the device list, direct mode and frames,
+/// all by controller id, plus rescans and the start and end of detection.
 ///
 /// OpenRGB.NET 3.1.1 negotiates protocol 4 at most, and it cannot simply be told to ask for
 /// more. Its read loop looks every incoming packet id up in a table of the ids it knows; the
 /// first ACK or detection notice throws there and ends the loop without a word, after which
-/// every request waits forever. So the library keeps reading the list and setting modes, and
-/// this socket carries what protocol 4 cannot.
+/// every request waits forever. It is kept for servers older than 1.0 and not used otherwise.
 ///
-/// Frames have to go here as well. OpenRGB 1.0 queues a LED update to the controller's own
-/// thread and resolves it there by the thread's id - read as a list index when the client is
-/// below protocol 6. The first controller starts with id 0 at index 0, so this works until
-/// the list is rebuilt; after a rescan the board had id 1 at index 0, and every frame from
-/// protocol 4 was dropped without an answer while the LEDs stayed dark. Addressed by id, the
-/// same frame was acknowledged and lit the strips, after sleep too.
+/// Two faults of OpenRGB 1.0 against a protocol 4 client made that necessary. A LED update is
+/// queued to the controller's own thread and resolved there by the thread's id, read as a
+/// list index below protocol 6: the first controller starts with id 0 at index 0, so this
+/// works until the list is rebuilt, and after a rescan the board had id 1 at index 0 and
+/// every frame was dropped without an answer. And a description asked for by an index that
+/// is gone gets no reply at all - a rescan deletes every controller, the library went on
+/// waiting, and the paint thread with it. Here each request waits a limited time.
 ///
 /// The socket has to be read all the time. A protocol 6 client is sent an echo of every
 /// controller update, our own frames included - 26 packets of 490 bytes a second were
@@ -33,13 +39,16 @@ public sealed class ServerChannel : IDisposable
     const uint Protocol = 6;
 
     const uint IdControllerCount = 0;
+    const uint IdControllerData = 1;
     const uint IdAck = 10;
     const uint IdProtocolVersion = 40;
     const uint IdClientName = 50;
+    const uint IdDeviceListUpdated = 100;
     const uint IdDetectionStarted = 101;
     const uint IdDetectionComplete = 103;
     const uint IdRescanDevices = 140;
     const uint IdUpdateLeds = 1050;
+    const uint IdSetCustomMode = 1100;
 
     const uint StatusInvalidId = 4;
 
@@ -64,7 +73,11 @@ public sealed class ServerChannel : IDisposable
     long _completedAt;
     uint[] _ids = Array.Empty<uint>();
     int _idsReplies;
+    byte[] _data = Array.Empty<byte>();
+    uint _dataDevice;
+    int _dataReplies;
     int _invalidIdAcks;
+    int _listChanges;
 
     public bool IsConnected { get { lock (_gate) return _alive; } }
 
@@ -86,6 +99,9 @@ public sealed class ServerChannel : IDisposable
     /// the ids in hand are out of date and the list has to be read again.
     /// </summary>
     public int InvalidIdAcks { get { lock (_gate) return _invalidIdAcks; } }
+
+    /// <summary>How many times the server announced that its device list changed.</summary>
+    public int ListChanges { get { lock (_gate) return _listChanges; } }
 
     /// <summary>
     /// Connects and waits for the server's protocol version.
@@ -126,7 +142,10 @@ public sealed class ServerChannel : IDisposable
             _completedAt = 0;
             _ids = Array.Empty<uint>();
             _idsReplies = 0;
+            _data = Array.Empty<byte>();
+            _dataReplies = 0;
             _invalidIdAcks = 0;
+            _listChanges = 0;
         }
 
         var reader = new Thread(() => ReadLoop(tcp)) { IsBackground = true, Name = "OpenRGB protocol 6 channel" };
@@ -145,10 +164,7 @@ public sealed class ServerChannel : IDisposable
         }
     }
 
-    /// <summary>
-    /// The server's controller ids, in the order of its list - the same order the client
-    /// library numbers the devices in.
-    /// </summary>
+    /// <summary>The server's controller ids, in the order of its list.</summary>
     /// <returns>Null if the server does not support it or did not answer in time.</returns>
     public uint[]? RequestControllerIds(int timeoutMs = 1000)
     {
@@ -166,10 +182,151 @@ public sealed class ServerChannel : IDisposable
     }
 
     /// <summary>
+    /// One controller's description.
+    ///
+    /// The server does not answer for an id it no longer has, so no answer in time means
+    /// the controller is gone - which a rescan does to every one of them.
+    /// </summary>
+    /// <returns>Null if there was no answer in time or it could not be read.</returns>
+    public ControllerDescription? RequestController(uint id, int timeoutMs = 1000)
+    {
+        int replies;
+        lock (_gate)
+        {
+            if (!SupportedLocked) return null;
+            replies = _dataReplies;
+        }
+
+        if (!Send(IdControllerData, id, Array.Empty<byte>())) return null;
+
+        byte[] data;
+        lock (_gate)
+        {
+            // a late answer to an earlier request that timed out is skipped by its id
+            if (!WaitLocked(() => _dataReplies > replies && _dataDevice == id, timeoutMs)) return null;
+            data = _data;
+        }
+
+        try { return ParseDescription(id, data); }
+        catch { return null; }
+    }
+
+    /// <summary>
+    /// Reads a protocol 6 controller description, keeping only what the program uses.
+    ///
+    /// The layout follows RGBController::GetDeviceDescriptionData in OpenRGB 1.0. A read
+    /// that does not end exactly where the data does is thrown away: a field of the wrong
+    /// size would shift every one after it, and a list of wrong zone lengths paints the
+    /// wrong LEDs rather than none.
+    /// </summary>
+    static ControllerDescription? ParseDescription(uint id, byte[] data)
+    {
+        var c = new Cursor(data);
+
+        // сервер повторяет полный размер в начале данных
+        if (c.U32() != data.Length) return null;
+
+        int type = (int)c.U32();
+        string name = c.Str();
+        c.Str();                                // vendor
+        c.Str();                                // description
+        c.Str();                                // version
+        c.Str();                                // serial
+        string location = c.Str();
+
+        int modes = c.U16();
+        c.U32();                                // active mode
+        for (int m = 0; m < modes; m++) SkipMode(c);
+
+        var zones = new ControllerZone[c.U16()];
+        for (int z = 0; z < zones.Length; z++)
+        {
+            string zoneName = c.Str();
+            c.U32();                            // type
+            c.U32();                            // leds min
+            c.U32();                            // leds max
+            int count = (int)c.U32();
+            c.Skip(c.U16());                    // matrix map, size in bytes
+
+            int segments = c.U16();
+            for (int s = 0; s < segments; s++)
+            {
+                c.Str();                        // name
+                c.U32();                        // type
+                c.U32();                        // start
+                c.U32();                        // count
+                c.Skip(c.U16());                // matrix map
+                c.U32();                        // flags
+            }
+
+            c.U32();                            // zone flags
+            c.U32();                            // zone active mode
+            int zoneModes = c.U16();
+            for (int m = 0; m < zoneModes; m++) SkipMode(c);
+            c.Str();                            // display name
+
+            zones[z] = new ControllerZone(zoneName, count);
+        }
+
+        int leds = c.U16();
+        for (int l = 0; l < leds; l++) c.Str();
+
+        c.Skip(4 * c.U16());                    // colors
+
+        int displayNames = c.U16();
+        for (int n = 0; n < displayNames; n++) c.Str();
+
+        c.U32();                                // controller flags
+        c.Str();                                // display name
+        c.Skip((int)c.U32());                   // device configuration
+
+        return c.AtEnd ? new ControllerDescription(id, type, name, location, leds, zones) : null;
+    }
+
+    static void SkipMode(Cursor c)
+    {
+        c.Str();                                // name
+        c.Skip(4 * 11);                         // flags, speed min/max, brightness min/max, colours min/max, speed, brightness, direction, colour mode
+        c.Skip(4 * c.U16());                    // colors
+    }
+
+    /// <summary>Reads little-endian fields off a byte array; running off its end throws.</summary>
+    sealed class Cursor(byte[] data)
+    {
+        int _at;
+
+        public bool AtEnd => _at == data.Length;
+
+        public ushort U16() { Need(2); ushort v = BitConverter.ToUInt16(data, _at); _at += 2; return v; }
+        public uint U32() { Need(4); uint v = BitConverter.ToUInt32(data, _at); _at += 4; return v; }
+
+        public void Skip(int count) { Need(count); _at += count; }
+
+        /// <summary>A length-prefixed string; the length counts the terminating zero.</summary>
+        public string Str()
+        {
+            int length = U16();
+            Need(length);
+            int text = length > 0 && data[_at + length - 1] == 0 ? length - 1 : length;
+            string s = Encoding.UTF8.GetString(data, _at, text);
+            _at += length;
+            return s;
+        }
+
+        void Need(int count)
+        {
+            if (count < 0 || _at + count > data.Length) throw new IndexOutOfRangeException();
+        }
+    }
+
+    /// <summary>Puts a controller into per-LED mode. Resolved by id at once, without the controller's queue.</summary>
+    public bool SetCustomMode(uint controllerId) => Send(IdSetCustomMode, controllerId, Array.Empty<byte>());
+
+    /// <summary>
     /// Sends one full LED array to a controller.
     /// </summary>
     /// <param name="rgb">Three bytes per LED, at least <paramref name="count"/> of them.</param>
-    /// <returns>False if nothing could be sent; the caller has another way to write.</returns>
+    /// <returns>False if nothing could be sent.</returns>
     public bool UpdateLeds(uint controllerId, byte[] rgb, int count)
     {
         TcpClient? tcp;
@@ -311,6 +468,7 @@ public sealed class ServerChannel : IDisposable
                 stream.ReadExactly(header, 0, HeaderBytes);
                 if (header[0] != 'O' || header[1] != 'R' || header[2] != 'G' || header[3] != 'B') break;
 
+                uint device = BitConverter.ToUInt32(header, 4);
                 uint id = BitConverter.ToUInt32(header, 8);
                 uint size = BitConverter.ToUInt32(header, 12);
                 if (size > MaxPayloadBytes) break;
@@ -319,7 +477,8 @@ public sealed class ServerChannel : IDisposable
                 stream.ReadExactly(payload, 0, (int)size);
 
                 // эхо кадров идёт десятками в секунду, замок берётся только ради нужного
-                if (id is not (IdControllerCount or IdAck or IdProtocolVersion or IdDetectionStarted or IdDetectionComplete))
+                if (id is not (IdControllerCount or IdControllerData or IdAck or IdProtocolVersion or
+                               IdDeviceListUpdated or IdDetectionStarted or IdDetectionComplete))
                     continue;
 
                 // из подтверждений нужны только отказы кадрам по неизвестному id
@@ -341,6 +500,12 @@ public sealed class ServerChannel : IDisposable
                             _idsReplies++;
                             break;
 
+                        case IdControllerData:
+                            _data = payload.AsSpan(0, (int)size).ToArray();
+                            _dataDevice = device;
+                            _dataReplies++;
+                            break;
+
                         case IdAck:
                             _invalidIdAcks++;
                             break;
@@ -348,6 +513,10 @@ public sealed class ServerChannel : IDisposable
                         case IdProtocolVersion when size >= 4:
                             _serverVersion = BitConverter.ToUInt32(payload, 0);
                             _versionKnown = true;
+                            break;
+
+                        case IdDeviceListUpdated:
+                            _listChanges++;
                             break;
 
                         case IdDetectionStarted:
