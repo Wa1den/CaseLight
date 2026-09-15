@@ -20,7 +20,7 @@ public static class Loc
     /// silently shadowed newly reworded labels, so a mismatched version rewrites it. Only
     /// the two built-in files are rewritten; added languages are left alone.
     /// </summary>
-    const string Version = "15";
+    const string Version = "16";
 
     /// <summary>
     /// Bookkeeping entries rather than translated text: the version a file was written
@@ -263,6 +263,11 @@ public static class Loc
         ["tab.about"] = "О программе",
 
         ["main.window"] = "Окно",
+        ["main.backdrop"] = "Фон окна",
+        ["main.backdrop.note"] = "Материал, которым Windows заполняет фон окна. Mica и Mica Alt окрашены в цвет обоев рабочего стола, Mica Alt сильнее. Сквозь акрил размыто видны окна позади.",
+        ["main.backdrop.mica"] = "Mica",
+        ["main.backdrop.micaalt"] = "Mica Alt",
+        ["main.backdrop.acrylic"] = "Акрил",
         ["main.tray"] = "Сворачивать в трей",
         ["main.tray.note"] = "Крестик прячет окно, программа продолжает работать. Выход - через меню значка в трее.",
         ["main.startmin"] = "Запускать свёрнутым",
@@ -504,6 +509,11 @@ public static class Loc
         ["tab.about"] = "About",
 
         ["main.window"] = "Window",
+        ["main.backdrop"] = "Window background",
+        ["main.backdrop.note"] = "The material Windows fills the window background with. Mica and Mica Alt are tinted with the colour of the desktop wallpaper, Mica Alt more strongly. Acrylic shows the windows behind, blurred.",
+        ["main.backdrop.mica"] = "Mica",
+        ["main.backdrop.micaalt"] = "Mica Alt",
+        ["main.backdrop.acrylic"] = "Acrylic",
         ["main.tray"] = "Minimise to tray",
         ["main.tray.note"] = "The close button hides the window and the program keeps running. Exit through the tray icon menu.",
         ["main.startmin"] = "Start minimised",

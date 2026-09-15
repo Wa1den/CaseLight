@@ -90,6 +90,48 @@ public enum WakeRecovery
 public enum TestShape { Circle, Square }
 
 /// <summary>
+/// The material Windows fills the window background with.
+///
+/// There is no plain colour among them. The system caption buttons are drawn under the
+/// client area, so an opaque window background covers them, and with the background left
+/// transparent and no material the frame shows through black in either theme.
+/// </summary>
+public enum WindowBackdrop
+{
+    Mica,
+
+    /// <summary>Mica tinted more strongly, the one Windows gives windows with tabs in the title bar.</summary>
+    MicaAlt,
+    Acrylic
+}
+
+/// <summary>
+/// Reads the backdrop by name, falling back to the default on a name it does not know.
+///
+/// The stock enum converter throws on an unknown name, and <see cref="Scene.Load"/> answers
+/// any exception with an empty scene - a settings file from a later version with one more
+/// material in the list would cost the whole layout.
+/// </summary>
+sealed class WindowBackdropConverter : JsonConverter<WindowBackdrop>
+{
+    public override WindowBackdrop Read(ref Utf8JsonReader reader, Type type, JsonSerializerOptions options)
+    {
+        if (reader.TokenType == JsonTokenType.Number)
+        {
+            int n = reader.GetInt32();
+            return Enum.IsDefined(typeof(WindowBackdrop), n) ? (WindowBackdrop)n : WindowBackdrop.MicaAlt;
+        }
+
+        return Enum.TryParse(reader.GetString(), ignoreCase: true, out WindowBackdrop value)
+            ? value
+            : WindowBackdrop.MicaAlt;
+    }
+
+    public override void Write(Utf8JsonWriter writer, WindowBackdrop value, JsonSerializerOptions options) =>
+        writer.WriteStringValue(value.ToString());
+}
+
+/// <summary>
 /// The monitor, placed on the same plane as the case.
 ///
 /// Everything is positioned relative to it, because the whole point is for the case to
@@ -304,6 +346,8 @@ public sealed class Scene
 
     // ---- основное ---------------------------------------------------------
 
+    public WindowBackdrop Backdrop { get; set; } = WindowBackdrop.MicaAlt;
+
     public bool MinimizeToTray { get; set; } = true;
     public bool StartMinimized { get; set; }
     public bool WriteLog { get; set; } = true;
@@ -392,7 +436,7 @@ public sealed class Scene
         // Order matters: the list is walked front to back and the first converter that
         // accepts the type wins. JsonStringEnumConverter claims every enum, so the one
         // that knows the old name has to stand ahead of it.
-        Converters = { new CaptureSourceConverter(), new JsonStringEnumConverter() }
+        Converters = { new CaptureSourceConverter(), new WindowBackdropConverter(), new JsonStringEnumConverter() }
     };
 
     [JsonIgnore]
