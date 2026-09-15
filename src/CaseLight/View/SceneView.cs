@@ -270,8 +270,14 @@ public sealed class SceneView : FrameworkElement
         var tl = ToScreen(new Point(m.CenterX - m.Width / 2, m.CenterY - m.Height / 2));
         var br = ToScreen(new Point(m.CenterX + m.Width / 2, m.CenterY + m.Height / 2));
 
-        dc.PushOpacity(0.45);
-        dc.DrawImage(Screen, new Rect(tl, br));
+        var rect = new Rect(tl, br);
+
+        // Холст лежит полупрозрачной карточкой на материале окна, и без подложки цвет обоев
+        // смешивается с цветом кадра. Небольшая прозрачность оставлена, чтобы подписи фигур
+        // поверх кадра читались.
+        dc.DrawRectangle(Themed("PanelSolid"), null, rect);
+        dc.PushOpacity(0.9);
+        dc.DrawImage(Screen, rect);
         dc.Pop();
     }
 

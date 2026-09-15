@@ -749,6 +749,7 @@ public sealed partial class MainWindow
         _painter.Start();
 
         if (_testButton != null) _testButton.Content = Loc.T("test.stop");
+        UpdateStartButton();
         Say(Loc.P("Тест запущен. Пятно перемещается мышью по холсту.", "Test running. The patch is moved around the canvas with the mouse."));
     }
 
@@ -766,6 +767,7 @@ public sealed partial class MainWindow
         _painter.Stop();
 
         if (_testButton != null) _testButton.Content = Loc.T("test.start");
+        UpdateStartButton();
         Say(Loc.P("Тест завершён, подсветка погашена.", "Test finished, the lighting is off."));
     }
 

@@ -5,6 +5,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
+using System.Windows.Shell;
 using System.Windows.Threading;
 using CaseLight.Core.Capture;
 using CaseLight.Core.Power;
@@ -62,10 +63,11 @@ public sealed partial class MainWindow : Window
     ColumnDefinition _canvasColumn = null!;
     Grid _canvasHost = null!;
     DockPanel _rail = null!;
-    DockPanel _bottomBar = null!;
+    DockPanel _root = null!;
+    StackPanel _titleName = null!;
+    StackPanel _canvasTools = null!;
     CheckBox _canvasToggle = null!;
     Button _startButton = null!;
-    Button _stopButton = null!;
     Button _applyButton = null!;
     Button _cancelButton = null!;
     TextBlock _dirtyText = null!;
@@ -77,8 +79,11 @@ public sealed partial class MainWindow : Window
     double _wideWidth;
     bool? _canvasShown;
 
-    /// <summary>Narrower than this the canvas has no room worth the name.</summary>
-    const double WideMinWidth = 1100;
+    /// <summary>
+    /// The narrowest the window may be with the canvas open. Measured in
+    /// <see cref="UpdateWideMinWidth"/>; the number here only stands in until then.
+    /// </summary>
+    double _wideMinWidth = 1100;
 
     /// <summary>Width of the settings page, the same with the canvas and without it.</summary>
     const double PageWidth = 440;
@@ -160,7 +165,9 @@ public sealed partial class MainWindow : Window
 
         Title = Loc.T("app.title");
 
-        try { Icon = new System.Windows.Media.Imaging.BitmapImage(new Uri("pack://application:,,,/icon.ico")); }
+        // BitmapImage берёт из ico только первый кадр, 16 точек, и панель задач показывала
+        // его мелким; BitmapFrame отдаёт окну все кадры на выбор (Docs/Интерфейс.md)
+        try { Icon = BitmapFrame.Create(new Uri("pack://application:,,,/icon.ico")); }
         catch { /* без иконки окно всё равно работает */ }
 
         _saved = _scene.Clone();
@@ -168,6 +175,7 @@ public sealed partial class MainWindow : Window
 
         RestoreWindowGeometry();
         Content = BuildLayout();
+        SetupChrome();
 
         _view.Scene = _scene;
         _view.SelectionChanged += (_, _) => { SyncFixtureList(); ShowFixturePanel(); };
@@ -191,6 +199,7 @@ public sealed partial class MainWindow : Window
         {
             _power.Attach(this);
             SetupTray();
+            UpdateChromeMetrics();
 
             EnsureServer();
             ConnectHub();
@@ -284,6 +293,37 @@ public sealed partial class MainWindow : Window
         _canvasColumn = new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) };
         grid.ColumnDefinitions.Add(_canvasColumn);
 
+        // The title bar is the first row of the same grid, so what stands in it lines up
+        // with the column below: the program name over the sections, the painting over the
+        // page, the canvas switches over the canvas.
+        grid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(TitleHeight) });
+        grid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+
+        // ---- заголовок
+        _titleName = BuildTitleName();
+        grid.Children.Add(_titleName);
+
+        grid.Children.Add(BuildTitleActions());
+
+        _canvasTools = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            HorizontalAlignment = HorizontalAlignment.Right,
+            VerticalAlignment = VerticalAlignment.Center,
+            Margin = new Thickness(0, 0, _captionWidth + CaptionGap, 0)
+        };
+
+        _screenToggle = BuildScreenToggle();
+        _autoFitToggle = BuildAutoFitToggle();
+        _fitButton = BuildFitButton();
+        _canvasTools.Children.Add(_screenToggle);
+        _canvasTools.Children.Add(_autoFitToggle);
+        _canvasTools.Children.Add(_fitButton);
+
+        WindowChrome.SetIsHitTestVisibleInChrome(_canvasTools, true);
+        Grid.SetColumn(_canvasTools, 2);
+        grid.Children.Add(_canvasTools);
+
         // ---- слева: столбец разделов шириной по самой длинной подписи
         _nav = new ListBox
         {
@@ -314,24 +354,10 @@ public sealed partial class MainWindow : Window
             HideFixturePanel();
         };
 
-        // The canvas switch lives under the sections rather than in them: it is about the
-        // shape of the window, not about any one page.
-        _canvasToggle = (CheckBox)Ui.Check(Loc.T("nav.canvas"), _scene.ShowCanvas, v =>
-        {
-            if (_rebuildingUi) return;
-
-            _scene.ShowCanvas = v;
-            ApplyCanvasVisibility();
-            Touch();
-        });
-
-        _canvasToggle.Margin = new Thickness(12, 12, 0, 0);
-        DockPanel.SetDock(_canvasToggle, Dock.Bottom);
-
         _rail = new DockPanel { Margin = new Thickness(6, 12, 6, 12) };
-        _rail.Children.Add(_canvasToggle);
         _rail.Children.Add(_nav);
 
+        Grid.SetRow(_rail, 1);
         Grid.SetColumn(_rail, 0);
         grid.Children.Add(_rail);
 
@@ -355,6 +381,7 @@ public sealed partial class MainWindow : Window
         Grid.SetRow(_dirtyBar, 2);
         page.Children.Add(_dirtyBar);
 
+        Grid.SetRow(page, 1);
         Grid.SetColumn(page, 1);
         grid.Children.Add(page);
 
@@ -379,45 +406,17 @@ public sealed partial class MainWindow : Window
         _fixtureOverlay.Visibility = Visibility.Collapsed;
         right.Children.Add(_fixtureOverlay);
 
+        Grid.SetRow(right, 1);
         Grid.SetColumn(right, 2);
         grid.Children.Add(right);
 
-        // ---- низ: действия и статус
-        var bottom = new DockPanel { Margin = new Thickness(12, 0, 12, 8) };
-        _bottomBar = bottom;
-
-        var actions = new StackPanel { Orientation = Orientation.Horizontal };
-        _startButton = Ui.Btn(Loc.T("bar.start"), StartPainting);
-        _stopButton = Ui.Btn(Loc.T("bar.stop"), StopPainting);
-        actions.Children.Add(_startButton);
-        actions.Children.Add(_stopButton);
-
-        DockPanel.SetDock(actions, Dock.Left);
-        bottom.Children.Add(actions);
-
-        // The bar is exactly as tall as its buttons, whatever else stands in it. The screen
-        // checkbox measures taller than they do, so with the canvas shown it set the height
-        // of the whole bar and the buttons rode along its top edge - and hiding the canvas
-        // took the checkbox away and dropped them by those few pixels.
-        actions.SizeChanged += (_, _) => bottom.Height = actions.ActualHeight;
-
-        // Правый край DockPanel достаётся тому, кто добавлен раньше, поэтому кнопка идёт
-        // первой и оказывается в самом углу.
-        _fitButton = BuildFitButton();
-        bottom.Children.Add(_fitButton);
-
-        _autoFitToggle = BuildAutoFitToggle();
-        bottom.Children.Add(_autoFitToggle);
-
-        _screenToggle = BuildScreenToggle();
-        bottom.Children.Add(_screenToggle);
-
+        // ---- низ: статус
         _status = new TextBlock
         {
             Foreground = Ui.FgDim,
             FontSize = Ui.TextSize,
             VerticalAlignment = VerticalAlignment.Center,
-            Margin = new Thickness(12, 0, 12, 0),
+            Margin = new Thickness(12, 0, 12, 8),
 
             // One line always: a message with a file path in it would otherwise wrap to
             // three and lift the whole bottom bar, and the bar moving about under the
@@ -426,17 +425,16 @@ public sealed partial class MainWindow : Window
             TextWrapping = TextWrapping.NoWrap,
             TextTrimming = TextTrimming.CharacterEllipsis
         };
-        bottom.Children.Add(_status);
-
-        // The bar is kept out of the grid on purpose. Spanning it across the columns made
-        // its own width a claim on them, and the first column is auto-sized: one status line
-        // about a lost connection stretched that column until the settings page hung off the
-        // right edge of the window. Docked here it takes what the window has, no more.
+        // The status line is kept out of the grid on purpose. Spanning it across the columns
+        // made its own width a claim on them, and the first column is auto-sized: one status
+        // line about a lost connection stretched that column until the settings page hung
+        // off the right edge of the window. Docked here it takes what the window has, no more.
         var root = new DockPanel();
-        DockPanel.SetDock(bottom, Dock.Bottom);
-        root.Children.Add(bottom);
+        DockPanel.SetDock(_status, Dock.Bottom);
+        root.Children.Add(_status);
         root.Children.Add(grid);
 
+        _root = root;
         return root;
     }
 
@@ -446,7 +444,7 @@ public sealed partial class MainWindow : Window
     /// </summary>
     UIElement BuildScreenToggle()
     {
-        // Under the canvas rather than in the settings: it is a way of looking at the
+        // Over the canvas rather than in the settings: it is a way of looking at the
         // layout, switched on and off while working on it, not something to set once.
         var toggle = Ui.Check(Loc.T("bar.screen"), _scene.ShowScreen, v =>
         {
@@ -458,7 +456,6 @@ public sealed partial class MainWindow : Window
         }, Loc.T("bar.screen.note"));
 
         if (toggle is FrameworkElement box) box.Margin = new Thickness(12, 0, 0, 0);
-        DockPanel.SetDock(toggle, Dock.Right);
         return toggle;
     }
 
@@ -488,7 +485,6 @@ public sealed partial class MainWindow : Window
         };
 
         button.Click += (_, _) => _view.FitToContent();
-        DockPanel.SetDock(button, Dock.Right);
         return button;
     }
 
@@ -508,7 +504,6 @@ public sealed partial class MainWindow : Window
         }, Loc.T("bar.autofit.note"));
 
         if (toggle is FrameworkElement box) box.Margin = new Thickness(12, 0, 0, 0);
-        DockPanel.SetDock(toggle, Dock.Right);
         return toggle;
     }
 
@@ -671,12 +666,16 @@ public sealed partial class MainWindow : Window
         // the settings may have arrived from a cancel, an import or a reset, not from a checkbox
         ApplyScreenPreview();
         ApplyCanvasVisibility();
+
+        // подписи над холстом могли смениться вместе с языком, а с ними и его ширина
+        UpdateWideMinWidth();
+        ApplyBackdrop();
     }
 
     /// <summary>
     /// Puts the two switches outside the settings pages back in step with the settings.
     ///
-    /// They stand under the sections and under the canvas rather than on a page, so a
+    /// They stand in the title bar rather than on a page, so a
     /// wholesale rebuild - cancel, import, reset - would otherwise leave them showing what
     /// was set before it. The screen switch carries its explanation inside itself and is
     /// replaced whole rather than relabelled.
@@ -699,12 +698,11 @@ public sealed partial class MainWindow : Window
     /// </summary>
     T Replace<T>(T old, T fresh) where T : UIElement
     {
-        int at = _bottomBar.Children.IndexOf(old);
+        int at = _canvasTools.Children.IndexOf(old);
         if (at < 0) return old;
 
-        _bottomBar.Children.RemoveAt(at);
-        _bottomBar.Children.Insert(at, fresh);
-        fresh.Visibility = _scene.ShowCanvas ? Visibility.Visible : Visibility.Collapsed;
+        _canvasTools.Children.RemoveAt(at);
+        _canvasTools.Children.Insert(at, fresh);
         return fresh;
     }
 
@@ -724,6 +722,23 @@ public sealed partial class MainWindow : Window
         panel.Children.Add(Ui.Labeled(Loc.T("main.language"), langBox, Loc.T("main.language.note")));
 
         panel.Children.Add(Ui.Header(Loc.T("main.window")));
+
+        var backdropBox = new ComboBox { Margin = new Thickness(0, 2, 0, 4) };
+        foreach (var backdrop in Backdrops) backdropBox.Items.Add(Loc.T(BackdropKey(backdrop)));
+        backdropBox.SelectedIndex = Math.Max(0, Array.IndexOf(Backdrops, _scene.Backdrop));
+        backdropBox.SelectionChanged += (_, _) =>
+        {
+            if (_rebuildingUi || backdropBox.SelectedIndex < 0) return;
+
+            // список поднимает событие и при входе в дерево, с тем же значением
+            var chosen = Backdrops[backdropBox.SelectedIndex];
+            if (chosen == _scene.Backdrop) return;
+
+            _scene.Backdrop = chosen;
+            ApplyBackdrop();
+            Touch();
+        };
+        panel.Children.Add(Ui.Labeled(Loc.T("main.backdrop"), backdropBox, Loc.T("main.backdrop.note")));
         panel.Children.Add(Ui.Check(Loc.T("main.tray"), _scene.MinimizeToTray, v => { _scene.MinimizeToTray = v; Touch(); },
             Loc.T("main.tray.note")));
         panel.Children.Add(Ui.Check(Loc.T("main.startmin"), _scene.StartMinimized, v => { _scene.StartMinimized = v; Touch(); }));
@@ -1595,6 +1610,9 @@ public sealed partial class MainWindow : Window
 
         if (_painter.IsRunning) SayFromTick(_painter.Status);
 
+        // раскраска останавливается и сама: тест, восстановление после сна
+        UpdateStartButton();
+
         if (_statValues.Length == StatRows().Length)
         {
             _statValues[0].Text = _painter.SourceInfo;
@@ -1777,29 +1795,28 @@ public sealed partial class MainWindow : Window
         if (_canvasShown == show) return;
         _canvasShown = show;
 
-        _fitButton.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
-        _autoFitToggle.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
-        _screenToggle.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
-
         if (show)
         {
             _canvasHost.Visibility = Visibility.Visible;
+            _canvasTools.Visibility = Visibility.Visible;
             _canvasColumn.Width = new GridLength(1, GridUnitType.Star);
 
             MaxWidth = double.PositiveInfinity;
-            MinWidth = WideMinWidth;
+            UpdateWideMinWidth();
             if (IsLoaded && WindowState == WindowState.Normal)
-                Width = Math.Max(WideMinWidth, _wideWidth);
+                Width = Math.Max(_wideMinWidth, _wideWidth);
             return;
         }
 
-        if (IsLoaded && WindowState == WindowState.Normal && ActualWidth >= WideMinWidth)
+        if (IsLoaded && WindowState == WindowState.Normal && ActualWidth >= _wideMinWidth)
             _wideWidth = ActualWidth;
 
         double narrow = NarrowWidth();
 
         _canvasHost.Visibility = Visibility.Collapsed;
+        _canvasTools.Visibility = Visibility.Collapsed;
         _canvasColumn.Width = new GridLength(0);
+        _canvasColumn.MinWidth = 0;
 
         MinWidth = 0;
         Width = narrow;
@@ -1807,28 +1824,48 @@ public sealed partial class MainWindow : Window
     }
 
     /// <summary>
-    /// What is left of the window once the canvas is gone: the section rail, the settings
-    /// page and the window frame. Added up rather than asked of the layout, because the
-    /// point is a width that does not depend on what is written in the window.
+    /// Keeps the canvas at least as wide as the switches standing over it in the title bar,
+    /// and the window wide enough for that canvas.
     ///
-    /// The rail is measured, not read: a rebuild of the sections changes its captions, and
-    /// before the window is shown nothing has been laid out at all. DesiredSize covers its
-    /// margins either way. The page's own right margin is left out - there is no canvas
-    /// beside it to keep clear of, and the window frame leaves a gap there anyway.
+    /// Measured rather than fixed: the captions change with the language, and the caption
+    /// buttons the switches keep clear of change with the scale of the screen.
     /// </summary>
-    double NarrowWidth()
+    void UpdateWideMinWidth()
     {
-        if (IsLoaded) UpdateLayout();
-        else if (_rail.DesiredSize.Width <= 0)
-            _rail.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+        if (!_scene.ShowCanvas) return;
 
-        // Пока окно не показано, рамку измерить нечем, поэтому стартовое значение
-        // приблизительное; в Loaded расчёт повторяется и заменяет его точным.
-        double frame = Content is FrameworkElement root && root.ActualWidth > 0
-            ? ActualWidth - root.ActualWidth
-            : 16;
+        _canvasTools.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+        double canvas = _canvasTools.DesiredSize.Width;
 
-        return _rail.DesiredSize.Width + PageWidth + frame;
+        _canvasColumn.MinWidth = canvas;
+        _wideMinWidth = LeftColumnWidth() + PageWidth + canvas;
+        MinWidth = _wideMinWidth;
+    }
+
+    /// <summary>
+    /// What is left of the window once the canvas is gone: the left column and the settings
+    /// page. Added up rather than asked of the layout, because the point is a width that
+    /// does not depend on what is written in the window.
+    ///
+    /// The page column already holds the page's right margin, and the content covers the
+    /// whole window frame, so that margin is the gap at the window edge.
+    /// </summary>
+    double NarrowWidth() => LeftColumnWidth() + PageWidth;
+
+    /// <summary>
+    /// The auto-sized first column: the wider of the section rail and the program name
+    /// over it.
+    ///
+    /// Measured, not read: a rebuild of the sections changes the captions, and before the
+    /// window is shown nothing has been laid out at all. DesiredSize covers the margins
+    /// either way.
+    /// </summary>
+    double LeftColumnWidth()
+    {
+        var any = new Size(double.PositiveInfinity, double.PositiveInfinity);
+        _rail.Measure(any);
+        _titleName.Measure(any);
+        return Math.Max(_rail.DesiredSize.Width, _titleName.DesiredSize.Width);
     }
 
     /// <summary>
@@ -1845,8 +1882,7 @@ public sealed partial class MainWindow : Window
 
         Title = Loc.T("app.title");
         _canvasToggle.Content = Loc.T("nav.canvas");
-        _startButton.Content = Loc.T("bar.start");
-        _stopButton.Content = Loc.T("bar.stop");
+        UpdateStartButton();
         _applyButton.Content = Loc.T("bar.apply");
         _cancelButton.Content = Loc.T("bar.cancel");
         _dirtyText.Text = Loc.T("bar.dirty");
@@ -1973,6 +2009,12 @@ public sealed partial class MainWindow : Window
         _serverStartedTicks = Environment.TickCount64;
     }
 
+    void TogglePainting()
+    {
+        if (_painter.IsRunning) StopPainting();
+        else StartPainting();
+    }
+
     void StartPainting()
     {
         EnsureServer();
@@ -1990,6 +2032,7 @@ public sealed partial class MainWindow : Window
         _painter.UseScene(_scene);
         _painter.Start();
         _paintingWanted = true;
+        UpdateStartButton();
 
         Say(_hub.IsReady ? Loc.P("Раскраска запущена.", "Painting started.") : Loc.P("Раскраска запущена, жду OpenRGB.", "Painting started, waiting for OpenRGB."));
     }
@@ -2085,6 +2128,7 @@ public sealed partial class MainWindow : Window
         _paintingWanted = false;
         StopTest();
         _painter.Stop();
+        UpdateStartButton();
         Say(Loc.P("Раскраска остановлена, подсветка погашена.", "Painting stopped, the lighting is off."));
     }
 
@@ -2092,9 +2136,9 @@ public sealed partial class MainWindow : Window
 
     void RestoreWindowGeometry()
     {
-        Width = Math.Max(WideMinWidth, _scene.WindowWidth);
+        Width = Math.Max(_wideMinWidth, _scene.WindowWidth);
         Height = Math.Max(700, _scene.WindowHeight);
-        MinWidth = WideMinWidth;
+        MinWidth = _wideMinWidth;
         MinHeight = 700;
 
         _wideWidth = Width;
