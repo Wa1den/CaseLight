@@ -20,7 +20,7 @@ public static class Loc
     /// silently shadowed newly reworded labels, so a mismatched version rewrites it. Only
     /// the two built-in files are rewritten; added languages are left alone.
     /// </summary>
-    const string Version = "16";
+    const string Version = "17";
 
     /// <summary>
     /// Bookkeeping entries rather than translated text: the version a file was written
@@ -330,6 +330,8 @@ public static class Loc
         ["capture.sharp"] = "резкость {0} %",
         ["capture.radius"] = "Область выборки",
         ["capture.radius.note"] = "Размер участка экрана, усредняемого для одного диода. При малом значении цвет меняется от любого движения в кадре, при большом усредняется до однородного оттенка.",
+        ["capture.bysize"] = "Область по размеру фигуры",
+        ["capture.bysize.note"] = "Прямоугольник фигуры целиком становится областью выборки, и делится между диодами: у полосы каждому достаётся отрезок её длины на всю ширину. Размер фигуры меняется по обеим сторонам, ползунок выше не действует. При выключении поперёк полосы и кольца с торца размер снова задаёт область выборки.",
         ["capture.stats"] = "Статистика",
         ["capture.rect"] = "Прямоугольник монитора: {0} × {1} мм",
 
@@ -576,6 +578,8 @@ public static class Loc
         ["capture.sharp"] = "sharpness {0}%",
         ["capture.radius"] = "Sampling area",
         ["capture.radius.note"] = "The size of the screen patch averaged for one LED. A small value makes the colour follow any movement in the frame, a large one averages it into an even tint.",
+        ["capture.bysize"] = "Sampling area from fixture size",
+        ["capture.bysize.note"] = "The whole rectangle of a fixture becomes its sampling area, and is divided between the LEDs: on a strip each one gets a piece of its length across the full width. Both sides of a fixture can then be resized, and the slider above has no effect. When switched off, the size across a strip or an edge-on ring is set by the sampling area again.",
         ["capture.stats"] = "Statistics",
         ["capture.rect"] = "Monitor rectangle: {0} × {1} mm",
 

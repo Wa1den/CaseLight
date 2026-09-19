@@ -202,6 +202,47 @@ public sealed class Scene
     public double SampleRadiusMm { get; set; } = 20;
 
     /// <summary>
+    /// Take the sampling area from the size of each fixture instead of <see cref="SampleRadiusMm"/>.
+    ///
+    /// The rectangle of a fixture is then the whole area it reads, and it is divided
+    /// between its LEDs (<see cref="LedGeometry.Cells"/>). A strip made wider reads a wider band
+    /// of the screen, which the radius could only give to every fixture at once. The meaning
+    /// of the fixture sizes changes with it, so it is switched by
+    /// <see cref="SetSampleBySize"/>, never set directly.
+    /// </summary>
+    public bool SampleBySize { get; set; }
+
+    /// <summary>
+    /// Switches <see cref="SampleBySize"/> and converts every fixture, so the outlines on the
+    /// canvas stay where they were.
+    ///
+    /// On the way in the outline, LEDs plus the sampling margin, becomes the rectangle. On
+    /// the way out the margin is taken back off the sides the LEDs spread along; across a
+    /// strip or a ring seen edge-on the size is the sampling area's again.
+    /// </summary>
+    public void SetSampleBySize(bool on)
+    {
+        if (on == SampleBySize) return;
+
+        double margin = 2 * SampleRadiusMm;
+
+        lock (Fixtures)
+            foreach (var f in Fixtures)
+            {
+                if (on)
+                {
+                    (f.Width, f.Height) = LedGeometry.MarginBox(f, SampleRadiusMm);
+                    continue;
+                }
+
+                if (LedGeometry.HasWidth(f)) f.Width = Math.Max(1, f.Width - margin);
+                if (LedGeometry.HasHeight(f)) f.Height = Math.Max(1, f.Height - margin);
+            }
+
+        SampleBySize = on;
+    }
+
+    /// <summary>
     /// How the frame is worked over before the zones are read, in percent from -50 to 50.
     /// Zero takes the picture as captured.
     ///
@@ -589,6 +630,9 @@ public sealed class Scene
     public void ResetToDefaults()
     {
         var shipped = new Scene();
+
+        // размеры фигур сохраняются, поэтому их смысл возвращается к обычному вместе с флагом
+        SetSampleBySize(shipped.SampleBySize);
 
         foreach (var prop in typeof(Scene).GetProperties())
             if (prop.CanRead && prop.CanWrite && Array.IndexOf(Preserved, prop.Name) < 0)

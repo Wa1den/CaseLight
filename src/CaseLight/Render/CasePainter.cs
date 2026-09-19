@@ -1095,21 +1095,37 @@ public sealed class CasePainter : IDisposable
                 ? Math.Min(existing, divider)
                 : divider;
 
-            var positions = LedGeometry.World(f);
+            var positions = LedGeometry.World(f, _scene.SampleBySize);
+            var cells = _scene.SampleBySize ? LedGeometry.Cells(f) : null;
             int count = Math.Min(available, positions.Length);
             int start = zones.Count;
 
             for (int i = 0; i < count; i++)
             {
-                double u = (positions[i].X - left) / w;
-                double v = (positions[i].Y - top) / h;
+                double u, v, hu = ru, hv = rv;
+
+                if (cells != null)
+                {
+                    // the LED's share of the fixture, centred where the share is rather
+                    // than where the LED sits: on a flat ring the two are apart
+                    var cell = LedGeometry.CellOnScene(f, cells[i]);
+                    u = (cell.X + cell.Width / 2 - left) / w;
+                    v = (cell.Y + cell.Height / 2 - top) / h;
+                    hu = cell.Width / 2 / w;
+                    hv = cell.Height / 2 / h;
+                }
+                else
+                {
+                    u = (positions[i].X - left) / w;
+                    v = (positions[i].Y - top) / h;
+                }
 
                 // outside the panel the nearest edge is what this LED can honestly show
                 u = Math.Clamp(u, 0, 1);
                 v = Math.Clamp(v, 0, 1);
 
-                zones.Add(new LedZone(Math.Clamp(u - ru, 0, 1), Math.Clamp(v - rv, 0, 1),
-                                      Math.Clamp(u + ru, 0, 1), Math.Clamp(v + rv, 0, 1),
+                zones.Add(new LedZone(Math.Clamp(u - hu, 0, 1), Math.Clamp(v - hv, 0, 1),
+                                      Math.Clamp(u + hu, 0, 1), Math.Clamp(v + hv, 0, 1),
                                       Side.Bottom));
                 targets.Add(new Target(device, firstGlobal + i));
                 world.Add(positions[i]);

@@ -82,6 +82,8 @@
   "capture.sharp": "sharpness {0}%",
   "capture.radius": "Sampling area",
   "capture.radius.note": "The size of the screen patch averaged for one LED. A small value makes the colour follow any movement in the frame, a large one averages it into an even tint.",
+  "capture.bysize": "Sampling area from fixture size",
+  "capture.bysize.note": "The whole rectangle of a fixture becomes its sampling area, and is divided between the LEDs: on a strip each one gets a piece of its length across the full width. Both sides of a fixture can then be resized, and the slider above has no effect. When switched off, the size across a strip or an edge-on ring is set by the sampling area again.",
   "capture.stats": "Statistics",
   "capture.rect": "Monitor rectangle: {0} × {1} mm",
   "stats.source": "Source",
