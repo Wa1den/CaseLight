@@ -657,6 +657,18 @@ public sealed partial class MainWindow
         };
         panel.Children.Add(Ui.Labeled(Loc.T("test.shape"), shapeBox));
 
+        var modeBox = new ComboBox { Margin = new Thickness(0, 2, 0, 8) };
+        modeBox.Items.Add(Loc.T("test.mode.area"));
+        modeBox.Items.Add(Loc.T("test.mode.led"));
+        modeBox.SelectedIndex = _scene.TestByArea ? 0 : 1;
+        modeBox.SelectionChanged += (_, _) =>
+        {
+            _scene.TestByArea = modeBox.SelectedIndex == 0;
+            PushTestPatch();
+            Touch();
+        };
+        panel.Children.Add(Ui.Labeled(Loc.T("test.mode"), modeBox, Loc.T("test.mode.note")));
+
         panel.Children.Add(Ui.Slider(Loc.T("test.size"), _scene.TestSizeMm, 20, 1200, 10, v =>
         {
             _scene.TestSizeMm = v;
@@ -793,6 +805,7 @@ public sealed partial class MainWindow
             CenterY = _view.TestCenter.Y,
             SizeMm = _scene.TestSizeMm,
             Circle = _scene.TestShape == TestShape.Circle,
+            ByArea = _scene.TestByArea,
             R = c.R,
             G = c.G,
             B = c.B

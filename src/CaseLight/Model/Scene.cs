@@ -385,6 +385,16 @@ public sealed class Scene
 
     public string TestColor { get; set; } = "#FF4020";
 
+    /// <summary>
+    /// Light each LED by the part of its sampling area under the patch, as a real frame
+    /// would, instead of by whether the patch covers the LED itself.
+    ///
+    /// The two answer different questions. By the LED the test checks where the LEDs are
+    /// placed; by the area it shows what each LED actually reads, which is what matters
+    /// once the sampling area is wide or taken from the size of the fixture.
+    /// </summary>
+    public bool TestByArea { get; set; } = true;
+
     // ---- основное ---------------------------------------------------------
 
     public WindowBackdrop Backdrop { get; set; } = WindowBackdrop.MicaAlt;

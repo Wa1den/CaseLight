@@ -20,7 +20,7 @@ public static class Loc
     /// silently shadowed newly reworded labels, so a mismatched version rewrites it. Only
     /// the two built-in files are rewritten; added languages are left alone.
     /// </summary>
-    const string Version = "17";
+    const string Version = "18";
 
     /// <summary>
     /// Bookkeeping entries rather than translated text: the version a file was written
@@ -331,7 +331,7 @@ public static class Loc
         ["capture.radius"] = "Область выборки",
         ["capture.radius.note"] = "Размер участка экрана, усредняемого для одного диода. При малом значении цвет меняется от любого движения в кадре, при большом усредняется до однородного оттенка.",
         ["capture.bysize"] = "Область по размеру фигуры",
-        ["capture.bysize.note"] = "Прямоугольник фигуры целиком становится областью выборки, и делится между диодами: у полосы каждому достаётся отрезок её длины на всю ширину. Размер фигуры меняется по обеим сторонам, ползунок выше не действует. При выключении поперёк полосы и кольца с торца размер снова задаёт область выборки.",
+        ["capture.bysize.note"] = "Каждый диод усредняет свою долю прямоугольника фигуры, поэтому более широкая фигура берёт цвет с более широкого участка экрана. Размер фигуры задаётся по обеим сторонам, ползунок выше не действует.",
         ["capture.stats"] = "Статистика",
         ["capture.rect"] = "Прямоугольник монитора: {0} × {1} мм",
 
@@ -473,6 +473,10 @@ public static class Loc
         ["test.circle"] = "Круг",
         ["test.square"] = "Квадрат",
         ["test.shape"] = "Форма пятна",
+        ["test.mode"] = "Зажигать диоды",
+        ["test.mode.area"] = "По области выборки",
+        ["test.mode.led"] = "По положению диода",
+        ["test.mode.note"] = "По области диод горит тем ярче, чем большую часть его области выборки закрывает пятно, как при настоящем кадре. По положению диод горит, только когда пятно накрывает точку, где он стоит: так проще проверить расстановку.",
         ["test.size"] = "Размер пятна",
         ["test.colour"] = "Выбрать цвет…",
 
@@ -579,7 +583,7 @@ public static class Loc
         ["capture.radius"] = "Sampling area",
         ["capture.radius.note"] = "The size of the screen patch averaged for one LED. A small value makes the colour follow any movement in the frame, a large one averages it into an even tint.",
         ["capture.bysize"] = "Sampling area from fixture size",
-        ["capture.bysize.note"] = "The whole rectangle of a fixture becomes its sampling area, and is divided between the LEDs: on a strip each one gets a piece of its length across the full width. Both sides of a fixture can then be resized, and the slider above has no effect. When switched off, the size across a strip or an edge-on ring is set by the sampling area again.",
+        ["capture.bysize.note"] = "Each LED averages its share of the fixture's rectangle, so a wider fixture takes its colour from a wider patch of the screen. Both sides of a fixture are then set, and the slider above has no effect.",
         ["capture.stats"] = "Statistics",
         ["capture.rect"] = "Monitor rectangle: {0} × {1} mm",
 
@@ -721,6 +725,10 @@ public static class Loc
         ["test.circle"] = "Circle",
         ["test.square"] = "Square",
         ["test.shape"] = "Patch shape",
+        ["test.mode"] = "Light the LEDs",
+        ["test.mode.area"] = "By sampling area",
+        ["test.mode.led"] = "By LED position",
+        ["test.mode.note"] = "By area an LED is brighter the more of its sampling area the patch covers, as with a real frame. By position an LED lights only when the patch covers the point where it stands, which makes the placement easier to check.",
         ["test.size"] = "Patch size",
         ["test.colour"] = "Choose colour…",
 
