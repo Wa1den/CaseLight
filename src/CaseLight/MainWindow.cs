@@ -930,9 +930,26 @@ public sealed partial class MainWindow : Window
             Loc.T("capture.fps.note"),
             format: v => v >= FpsFree ? Loc.T("capture.fps.free") : v.ToString("0")));
 
-        panel.Children.Add(Ui.Slider(Loc.T("capture.radius"), _scene.SampleRadiusMm, 1, 100, 1,
+        // Отключённый ползунок в этой теме почти не отличается от живого, поэтому он ещё и
+        // приглушается, как настройки фигуры, взятые из общих.
+        var radius = Ui.Slider(Loc.T("capture.radius"), _scene.SampleRadiusMm, 1, 100, 1,
             v => { _scene.SampleRadiusMm = Math.Max(1, v); ShowSampleArea(); Touch(); }, Loc.T("unit.mm"),
-            Loc.T("capture.radius.note")));
+            Loc.T("capture.radius.note"), enabled: !_scene.SampleBySize);
+        if (_scene.SampleBySize) radius.Opacity = 0.45;
+        panel.Children.Add(radius);
+
+        // Переключение меняет смысл размеров всех фигур, поэтому они пересчитываются сразу,
+        // а страница и панель фигуры строятся заново: у ползунка и полей размера другое состояние.
+        panel.Children.Add(Ui.Check(Loc.T("capture.bysize"), _scene.SampleBySize, v =>
+        {
+            if (_rebuildingUi) return;
+
+            _scene.SetSampleBySize(v);
+            RebuildSections();
+            BuildFixturePanel();
+            Touch();
+            AutoFit();
+        }, Loc.T("capture.bysize.note")));
 
         // Один ползунок на две противоположные вещи, ноль посередине: включить обе сразу
         // нельзя, потому что вторая отменяла бы первую. Шкала целая, в процентах: дробный

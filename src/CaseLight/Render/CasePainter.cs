@@ -19,6 +19,13 @@ public sealed class TestPatch
 {
     public double CenterX, CenterY, SizeMm;
     public bool Circle = true;
+
+    /// <summary>
+    /// Light an LED by how much of its sampling area the patch covers, rather than by
+    /// whether the patch covers the LED itself. See <see cref="Scene.TestByArea"/>.
+    /// </summary>
+    public bool ByArea;
+
     public byte R = 255, G = 64, B = 32;
 }
 
@@ -115,6 +122,9 @@ public sealed class CasePainter : IDisposable
 
     /// <summary>Where each LED physically is - the test patch works in scene space, not screen space.</summary>
     Point[] _world = Array.Empty<Point>();
+
+    /// <summary>The patch of scene each LED averages, in millimetres, for the placement test.</summary>
+    Rect[] _areas = Array.Empty<Rect>();
 
     /// <summary>How often each device is written, in frames. Slow buses get a larger number.</summary>
     readonly Dictionary<int, int> _deviceDivider = new();
@@ -953,29 +963,70 @@ public sealed class CasePainter : IDisposable
     /// <summary>
     /// Paints straight from the movable patch instead of the screen.
     ///
-    /// Deliberately bypasses the zone sampling: the patch is a shape on the scene, so the
-    /// only question is whether an LED stands inside it. Everything after this - colour,
-    /// gamma, smoothing - is the path the real picture takes, so what the test shows is
-    /// what real content will do.
+    /// Deliberately bypasses the zone sampling: the patch is a shape on the scene, and the
+    /// question is either whether an LED stands inside it or how much of the LED's sampling
+    /// area it covers. The second is what averaging a real frame gives: a patch over a
+    /// quarter of the area makes the LED a quarter as bright. Everything after this -
+    /// colour, gamma, smoothing - is the path the real picture takes.
+    ///
+    /// The areas are not clamped to the screen here, unlike the real zones: the test is
+    /// about the layout on the canvas, and the patch can be dragged beside the monitor.
     /// </summary>
     void FillFromTest(TestPatch patch)
     {
-        double half = patch.SizeMm / 2;
-
         for (int i = 0; i < _world.Length && i * 3 + 2 < _sampled.Length; i++)
         {
-            double dx = _world[i].X - patch.CenterX;
-            double dy = _world[i].Y - patch.CenterY;
-
-            bool inside = patch.Circle
-                ? dx * dx + dy * dy <= half * half
-                : Math.Abs(dx) <= half && Math.Abs(dy) <= half;
+            double share = patch.ByArea && i < _areas.Length
+                ? Covered(patch, _areas[i])
+                : Inside(patch, _world[i]) ? 1 : 0;
 
             int o = i * 3;
-            _sampled[o] = inside ? patch.R : (byte)0;
-            _sampled[o + 1] = inside ? patch.G : (byte)0;
-            _sampled[o + 2] = inside ? patch.B : (byte)0;
+            _sampled[o] = (byte)Math.Round(patch.R * share);
+            _sampled[o + 1] = (byte)Math.Round(patch.G * share);
+            _sampled[o + 2] = (byte)Math.Round(patch.B * share);
         }
+    }
+
+    static bool Inside(TestPatch patch, Point p)
+    {
+        double half = patch.SizeMm / 2;
+        double dx = p.X - patch.CenterX;
+        double dy = p.Y - patch.CenterY;
+
+        return patch.Circle
+            ? dx * dx + dy * dy <= half * half
+            : Math.Abs(dx) <= half && Math.Abs(dy) <= half;
+    }
+
+    /// <summary>
+    /// The part of an area under the patch, 0..1. A square is intersected exactly; a circle
+    /// is counted on a 12 by 12 grid, in steps of 1/144 of the area.
+    /// </summary>
+    static double Covered(TestPatch patch, Rect area)
+    {
+        if (area.Width <= 0 || area.Height <= 0) return 0;
+
+        double half = patch.SizeMm / 2;
+
+        if (!patch.Circle)
+        {
+            double w = Math.Min(area.Right, patch.CenterX + half) - Math.Max(area.Left, patch.CenterX - half);
+            double h = Math.Min(area.Bottom, patch.CenterY + half) - Math.Max(area.Top, patch.CenterY - half);
+            return w <= 0 || h <= 0 ? 0 : w * h / (area.Width * area.Height);
+        }
+
+        const int Grid = 12;
+        int hits = 0;
+
+        for (int y = 0; y < Grid; y++)
+        for (int x = 0; x < Grid; x++)
+        {
+            var p = new Point(area.Left + (x + 0.5) / Grid * area.Width,
+                              area.Top + (y + 0.5) / Grid * area.Height);
+            if (Inside(patch, p)) hits++;
+        }
+
+        return hits / (double)(Grid * Grid);
     }
 
     /// <summary>
@@ -1066,6 +1117,7 @@ public sealed class CasePainter : IDisposable
         var zones = new List<LedZone>();
         var targets = new List<Target>();
         var world = new List<Point>();
+        var areas = new List<Rect>();
         var groups = new List<Group>();
 
         _deviceDivider.Clear();
@@ -1075,8 +1127,7 @@ public sealed class CasePainter : IDisposable
         double top = m.CenterY - m.Height / 2;
         double w = Math.Max(1, m.Width), h = Math.Max(1, m.Height);
 
-        double ru = _scene.SampleRadiusMm / w;
-        double rv = _scene.SampleRadiusMm / h;
+        double r = _scene.SampleRadiusMm;
 
         // Snapshot under the same lock the UI takes: adding or removing a fixture while
         // this loop walks the list would throw right out of the paint thread.
@@ -1095,24 +1146,34 @@ public sealed class CasePainter : IDisposable
                 ? Math.Min(existing, divider)
                 : divider;
 
-            var positions = LedGeometry.World(f);
+            var positions = LedGeometry.World(f, _scene.SampleBySize);
+            var cells = _scene.SampleBySize ? LedGeometry.Cells(f) : null;
             int count = Math.Min(available, positions.Length);
             int start = zones.Count;
 
             for (int i = 0; i < count; i++)
             {
-                double u = (positions[i].X - left) / w;
-                double v = (positions[i].Y - top) / h;
+                // the LED's share of the fixture, centred where the share is rather than
+                // where the LED sits: on a flat ring the two are apart
+                var area = cells != null
+                    ? LedGeometry.CellOnScene(f, cells[i])
+                    : new Rect(positions[i].X - r, positions[i].Y - r, 2 * r, 2 * r);
+
+                double u = (area.X + area.Width / 2 - left) / w;
+                double v = (area.Y + area.Height / 2 - top) / h;
+                double hu = area.Width / 2 / w;
+                double hv = area.Height / 2 / h;
 
                 // outside the panel the nearest edge is what this LED can honestly show
                 u = Math.Clamp(u, 0, 1);
                 v = Math.Clamp(v, 0, 1);
 
-                zones.Add(new LedZone(Math.Clamp(u - ru, 0, 1), Math.Clamp(v - rv, 0, 1),
-                                      Math.Clamp(u + ru, 0, 1), Math.Clamp(v + rv, 0, 1),
+                zones.Add(new LedZone(Math.Clamp(u - hu, 0, 1), Math.Clamp(v - hv, 0, 1),
+                                      Math.Clamp(u + hu, 0, 1), Math.Clamp(v + hv, 0, 1),
                                       Side.Bottom));
                 targets.Add(new Target(device, firstGlobal + i));
                 world.Add(positions[i]);
+                areas.Add(area);
             }
 
             int taken = zones.Count - start;
@@ -1132,6 +1193,7 @@ public sealed class CasePainter : IDisposable
         RemapZones();
         _targets = targets.ToArray();
         _world = world.ToArray();
+        _areas = areas.ToArray();
         _sampled = new byte[_zones.Length * 3];
         _output = new byte[_zones.Length * 3];
 

@@ -298,7 +298,7 @@ public sealed class SceneView : FrameworkElement
     {
         // The outline is the LEDs plus the margin each of them reads around itself, so what
         // is drawn is what the fixture takes from the picture - not merely where it sits.
-        var corners = LedGeometry.BoxCorners(f, Scene.SampleRadiusMm).Select(ToScreen).ToArray();
+        var corners = LedGeometry.BoxCorners(f, Scene).Select(ToScreen).ToArray();
 
         var geometry = new StreamGeometry();
         using (var ctx = geometry.Open())
@@ -315,7 +315,7 @@ public sealed class SceneView : FrameworkElement
         dc.DrawGeometry(fill, pen, geometry);
 
         // the LEDs themselves - the whole reason this is drawn by hand
-        var leds = LedGeometry.World(f);
+        var leds = LedGeometry.World(f, Scene.SampleBySize);
         double dot = Math.Clamp(2.2 * _scale, 1.6, 5.0);
 
         for (int i = 0; i < leds.Length; i++)
@@ -354,7 +354,7 @@ public sealed class SceneView : FrameworkElement
 
     void DrawHandles(DrawingContext dc, Fixture f)
     {
-        var corners = LedGeometry.BoxCorners(f, Scene.SampleRadiusMm).Select(ToScreen).ToArray();
+        var corners = LedGeometry.BoxCorners(f, Scene).Select(ToScreen).ToArray();
         var pen = new Pen(Themed("Fg"), 1.5);
 
         foreach (var c in corners)
@@ -369,7 +369,7 @@ public sealed class SceneView : FrameworkElement
 
     Point RotateHandle(Fixture f)
     {
-        var corners = LedGeometry.BoxCorners(f, Scene.SampleRadiusMm).Select(ToScreen).ToArray();
+        var corners = LedGeometry.BoxCorners(f, Scene).Select(ToScreen).ToArray();
         var mid = new Point((corners[0].X + corners[1].X) / 2, (corners[0].Y + corners[1].Y) / 2);
         var centre = ToScreen(new Point(f.CenterX, f.CenterY));
 
@@ -419,7 +419,7 @@ public sealed class SceneView : FrameworkElement
             }
 
             // the same corners the handles are drawn on, or they cannot be grabbed at all
-            var corners = LedGeometry.BoxCorners(Selected, Scene.SampleRadiusMm).Select(ToScreen).ToArray();
+            var corners = LedGeometry.BoxCorners(Selected, Scene).Select(ToScreen).ToArray();
             for (int i = 0; i < 4; i++)
                 if (Distance(px, corners[i]) <= HandleRadius + 3)
                 {
@@ -434,7 +434,7 @@ public sealed class SceneView : FrameworkElement
 
         // topmost first, so overlapping fixtures pick the one drawn last; hidden ones are
         // reachable from the list and only from there
-        var hit = Scene.Fixtures.LastOrDefault(f => IsOnCanvas(f) && LedGeometry.HitTest(f, scene, Scene.SampleRadiusMm));
+        var hit = Scene.Fixtures.LastOrDefault(f => IsOnCanvas(f) && LedGeometry.HitTest(f, scene, Scene));
         Select(hit);
 
         if (hit != null)
@@ -526,7 +526,8 @@ public sealed class SceneView : FrameworkElement
     ///
     /// A flat fixture has only a length: a strip and a ring seen edge-on are lines, and
     /// across them the frame is as wide as the sampling area makes it, with nothing to set.
-    /// Both sides are draggable only for the shapes that really have two of them.
+    /// Both sides are draggable only for the shapes that really have two of them, or when
+    /// the sampling is taken from the size of the fixture and the frame is the area read.
     ///
     /// Proportions are free by default, since a frame really can be oblong, and held with
     /// Shift for the shapes where the proportions are the point.
@@ -535,10 +536,13 @@ public sealed class SceneView : FrameworkElement
     {
         if (Selected == null) return;
 
-        double reach = Scene.SampleRadiusMm;
+        // with the sampling taken from the size, the rectangle is the whole frame and has
+        // both sides whatever the shape
+        bool bySize = Scene.SampleBySize;
+        double reach = bySize ? 0 : Scene.SampleRadiusMm;
         var local = LedGeometry.ToLocal(_before, sceneTo);
 
-        var (boxW, boxH) = LedGeometry.BoxSize(_before, reach);
+        var (boxW, boxH) = LedGeometry.BoxSize(_before, Scene);
         double fixedX = _resizeCorner is 0 or 3 ? boxW / 2 : -boxW / 2;
         double fixedY = _resizeCorner is 0 or 1 ? boxH / 2 : -boxH / 2;
 
@@ -553,20 +557,14 @@ public sealed class SceneView : FrameworkElement
         }
 
         // back out of the box and into the spread of the LEDs themselves
-        bool canWidth = _before.Arrangement switch
-        {
-            Arrangement.Point => false,
-            Arrangement.Strip => true,
-            _ => !_before.EdgeOn
-        };
-
-        bool canHeight = _before.Arrangement is not (Arrangement.Point or Arrangement.Strip);
+        bool canWidth = bySize || LedGeometry.HasWidth(_before);
+        bool canHeight = bySize || LedGeometry.HasHeight(_before);
 
         Selected.Width = canWidth ? Math.Max(1, newBoxW - 2 * reach) : _before.Width;
         Selected.Height = canHeight ? Math.Max(1, newBoxH - 2 * reach) : _before.Height;
 
         // the grabbed corner moved, the opposite one did not, so the centre follows the box
-        var (grownW, grownH) = LedGeometry.BoxSize(Selected, reach);
+        var (grownW, grownH) = LedGeometry.BoxSize(Selected, Scene);
         double cx = fixedX + (fixedX > 0 ? -grownW / 2 : grownW / 2);
         double cy = fixedY + (fixedY > 0 ? -grownH / 2 : grownH / 2);
 
@@ -612,7 +610,7 @@ public sealed class SceneView : FrameworkElement
 
         // By the frame, which is what is seen and dragged: snapping to something invisible
         // would leave the fixture looking as if it still hung over the edge.
-        var corners = LedGeometry.BoxCorners(f, Scene.SampleRadiusMm);
+        var corners = LedGeometry.BoxCorners(f, Scene);
         double x0 = corners.Min(c => c.X), x1 = corners.Max(c => c.X);
         double y0 = corners.Min(c => c.Y), y1 = corners.Max(c => c.Y);
 

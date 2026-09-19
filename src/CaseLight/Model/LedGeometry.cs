@@ -1,4 +1,6 @@
 using System;
+using System.Collections.Generic;
+using System.Linq;
 using System.Windows;
 
 namespace CaseLight.Model;
@@ -16,7 +18,11 @@ public static class LedGeometry
     /// Positions inside the fixture's rectangle, in 0..1 with y growing downwards - screen
     /// convention, so the drawing code needs no flipping.
     /// </summary>
-    public static Point[] Local(Fixture f)
+    /// <param name="bySize">
+    /// The rectangle is the sampling area (<see cref="Scene.SampleBySize"/>). The LEDs are
+    /// then set in from its edges by the same distance as lies between them.
+    /// </param>
+    public static Point[] Local(Fixture f, bool bySize = false)
     {
         int n = Math.Max(0, f.Binding.LedCount);
         var points = new Point[n];
@@ -32,7 +38,7 @@ public static class LedGeometry
 
             points[i] = f.Arrangement switch
             {
-                Arrangement.Strip => StripPoint(k, n),
+                Arrangement.Strip => bySize ? new Point((k + 1.0) / (n + 1), 0.5) : StripPoint(k, n),
                 Arrangement.Closed => f.RoundContour ? RingPoint(k, n) : PerimeterPoint(k, n, f.ContourAspect),
                 _ => new Point(0.5, 0.5)
             };
@@ -46,7 +52,44 @@ public static class LedGeometry
                 points[i] = new Point(0.5, points[i].Y);
         }
 
+        if (bySize && f.Arrangement == Arrangement.Closed)
+        {
+            // Отступ от края равен среднему шагу между рядами диодов, как у полосы. Без него
+            // крайние диоды кольца стоят на самом краю рамки, где ряды теснее всего, и читают
+            // полосу в миллиметр-два высотой.
+            double sx = f.EdgeOn ? 0 : Step(points.Select(p => p.X));
+            double sy = Step(points.Select(p => p.Y));
+
+            for (int i = 0; i < n; i++)
+                points[i] = new Point(sx + points[i].X * (1 - 2 * sx),
+                                      sy + points[i].Y * (1 - 2 * sy));
+        }
+
         return points;
+    }
+
+    const double Same = 1e-9;
+
+    /// <summary>
+    /// The average distance between neighbouring rows of LEDs along one axis, in 0..1, once
+    /// the gaps at both edges are made the same size as it.
+    /// </summary>
+    static double Step(IEnumerable<double> values) => 1.0 / (Rows(values) + 1);
+
+    /// <summary>How many different positions the LEDs take along one axis.</summary>
+    static int Rows(IEnumerable<double> values)
+    {
+        int rows = 0;
+        double last = double.NaN;
+
+        foreach (double v in values.OrderBy(v => v))
+        {
+            if (rows > 0 && v - last < Same) continue;
+            rows++;
+            last = v;
+        }
+
+        return Math.Max(1, rows);
     }
 
     static Point StripPoint(int k, int n) => new((k + 0.5) / n, 0.5);
@@ -92,26 +135,205 @@ public static class LedGeometry
     }
 
     /// <summary>Positions on the scene, in millimetres.</summary>
-    public static Point[] World(Fixture f)
+    public static Point[] World(Fixture f, bool bySize = false)
     {
-        var local = Local(f);
+        var local = Local(f, bySize);
         var world = new Point[local.Length];
 
-        double rad = f.AngleDeg * Math.PI / 180.0;
-        double cos = Math.Cos(rad), sin = Math.Sin(rad);
-
         for (int i = 0; i < local.Length; i++)
-        {
-            // rectangle-local, measured from the centre so rotation leaves the centre alone
-            double dx = (local[i].X - 0.5) * f.Width;
-            double dy = (local[i].Y - 0.5) * f.Height;
-
-            world[i] = new Point(f.CenterX + dx * cos - dy * sin,
-                                 f.CenterY + dx * sin + dy * cos);
-        }
+            world[i] = ToScene(f, local[i]);
 
         return world;
     }
+
+    /// <summary>A point of the fixture's rectangle, given in 0..1, placed on the scene in millimetres.</summary>
+    public static Point ToScene(Fixture f, Point unit)
+    {
+        double rad = f.AngleDeg * Math.PI / 180.0;
+        double cos = Math.Cos(rad), sin = Math.Sin(rad);
+
+        // rectangle-local, measured from the centre so rotation leaves the centre alone
+        double dx = (unit.X - 0.5) * f.Width;
+        double dy = (unit.Y - 0.5) * f.Height;
+
+        return new Point(f.CenterX + dx * cos - dy * sin,
+                         f.CenterY + dx * sin + dy * cos);
+    }
+
+    // ---- выборка по размеру фигуры ----------------------------------------
+
+    /// <summary>
+    /// The part of the fixture's rectangle each LED reads, in 0..1, when the sampling area
+    /// is taken from the size of the fixture (<see cref="Scene.SampleBySize"/>).
+    ///
+    /// The cells cover the rectangle between them: an LED gets the part that is nearer to
+    /// it than to any other. Along a strip that is a slice of the length with the full
+    /// width across, the two at the ends reaching to the edges; on a ring seen edge-on it
+    /// is a band of the full width, no thinner than the average step between the LEDs. A
+    /// flat contour has LEDs all round, and there each one reads towards the middle.
+    /// </summary>
+    public static Rect[] Cells(Fixture f)
+    {
+        var points = Local(f, bySize: true);
+        var cells = new Rect[points.Length];
+        if (points.Length == 0) return cells;
+
+        switch (f.Arrangement)
+        {
+            case Arrangement.Point:
+                Array.Fill(cells, new Rect(0, 0, 1, 1));
+                break;
+
+            case Arrangement.Strip:
+            {
+                var spans = Split(points.Select(p => p.X).ToArray());
+                for (int i = 0; i < cells.Length; i++)
+                    cells[i] = new Rect(spans[i].Lo, 0, spans[i].Hi - spans[i].Lo, 1);
+                break;
+            }
+
+            case Arrangement.Closed when f.EdgeOn:
+            {
+                var spans = Split(points.Select(p => p.Y).ToArray());
+                for (int i = 0; i < cells.Length; i++)
+                    cells[i] = new Rect(0, spans[i].Lo, 1, spans[i].Hi - spans[i].Lo);
+                break;
+            }
+
+            default:
+                cells = Nearest(points, f.Width, f.Height);
+                break;
+        }
+
+        return cells;
+    }
+
+    /// <summary>
+    /// Splits 0..1 between the values along one axis, halfway between neighbours. Values
+    /// that coincide share a span: the two sides of a ring seen edge-on sit at one height.
+    ///
+    /// No span is narrower than the average step between the values. Along a strip every
+    /// span in the middle is exactly that, and the two at the ends reach the edges; on a
+    /// ring seen edge-on the LEDs near the top and bottom are closer together, and their
+    /// spans overlap instead of shrinking to a band too thin to average anything.
+    /// </summary>
+    static (double Lo, double Hi)[] Split(double[] values)
+    {
+        var order = Enumerable.Range(0, values.Length).OrderBy(i => values[i]).ToArray();
+
+        // группы совпадающих значений, по возрастанию
+        var groups = new List<List<int>>();
+        foreach (int i in order)
+        {
+            if (groups.Count > 0 && values[i] - values[groups[^1][0]] < Same) groups[^1].Add(i);
+            else groups.Add(new List<int> { i });
+        }
+
+        var spans = new (double Lo, double Hi)[values.Length];
+        for (int g = 0; g < groups.Count; g++)
+        {
+            double v = values[groups[g][0]];
+            double lo = g == 0 ? 0 : (values[groups[g - 1][0]] + v) / 2;
+            double hi = g == groups.Count - 1 ? 1 : (v + values[groups[g + 1][0]]) / 2;
+
+            double even = 1.0 / (groups.Count + 1);
+            if (hi - lo < even)
+            {
+                // вокруг самого диода, не выходя за рамку
+                lo = Math.Clamp(v - even / 2, 0, 1 - even);
+                hi = lo + even;
+            }
+
+            foreach (int i in groups[g]) spans[i] = (lo, hi);
+        }
+
+        return spans;
+    }
+
+    /// <summary>
+    /// The part of the rectangle nearest to each LED, reduced to its bounds, because a zone
+    /// of the sampler is a rectangle. Found on a grid, with distance measured in
+    /// millimetres, so a long frame is not split as if it were square.
+    ///
+    /// An LED too close to its neighbours to be the nearest to any grid node still reads the
+    /// spot it sits on.
+    /// </summary>
+    static Rect[] Nearest(Point[] points, double width, double height)
+    {
+        const int Grid = 64;
+        const double Half = 0.5 / Grid;
+
+        int n = points.Length;
+        width = Math.Max(width, 1e-6);
+        height = Math.Max(height, 1e-6);
+
+        var x0 = new double[n]; var x1 = new double[n];
+        var y0 = new double[n]; var y1 = new double[n];
+        for (int i = 0; i < n; i++)
+        {
+            x0[i] = x1[i] = points[i].X;
+            y0[i] = y1[i] = points[i].Y;
+        }
+
+        for (int gy = 0; gy < Grid; gy++)
+        for (int gx = 0; gx < Grid; gx++)
+        {
+            double px = (gx + 0.5) / Grid, py = (gy + 0.5) / Grid;
+
+            int best = 0;
+            double bestD = double.MaxValue;
+            for (int i = 0; i < n; i++)
+            {
+                double dx = (px - points[i].X) * width;
+                double dy = (py - points[i].Y) * height;
+                double d = dx * dx + dy * dy;
+                if (d < bestD) { bestD = d; best = i; }
+            }
+
+            x0[best] = Math.Min(x0[best], px - Half); x1[best] = Math.Max(x1[best], px + Half);
+            y0[best] = Math.Min(y0[best], py - Half); y1[best] = Math.Max(y1[best], py + Half);
+        }
+
+        var cells = new Rect[n];
+        for (int i = 0; i < n; i++)
+        {
+            double l = Math.Clamp(x0[i], 0, 1), r = Math.Clamp(x1[i], 0, 1);
+            double t = Math.Clamp(y0[i], 0, 1), b = Math.Clamp(y1[i], 0, 1);
+            cells[i] = new Rect(l, t, r - l, b - t);
+        }
+
+        return cells;
+    }
+
+    /// <summary>
+    /// A cell placed on the scene, as the upright rectangle around it: that is the shape a
+    /// sampling zone has. On a turned fixture the zone is therefore larger than the cell.
+    /// </summary>
+    public static Rect CellOnScene(Fixture f, Rect cell)
+    {
+        var a = ToScene(f, cell.TopLeft);
+        var b = ToScene(f, cell.TopRight);
+        var c = ToScene(f, cell.BottomRight);
+        var d = ToScene(f, cell.BottomLeft);
+
+        double left = Math.Min(Math.Min(a.X, b.X), Math.Min(c.X, d.X));
+        double right = Math.Max(Math.Max(a.X, b.X), Math.Max(c.X, d.X));
+        double top = Math.Min(Math.Min(a.Y, b.Y), Math.Min(c.Y, d.Y));
+        double bottom = Math.Max(Math.Max(a.Y, b.Y), Math.Max(c.Y, d.Y));
+
+        return new Rect(left, top, right - left, bottom - top);
+    }
+
+    /// <summary>Whether the LEDs spread along the fixture's width, in the usual mode.</summary>
+    public static bool HasWidth(Fixture f) => f.Arrangement switch
+    {
+        Arrangement.Point => false,
+        Arrangement.Strip => true,
+        _ => !f.EdgeOn
+    };
+
+    /// <summary>Whether the LEDs spread along the fixture's height, in the usual mode.</summary>
+    public static bool HasHeight(Fixture f) => f.Arrangement == Arrangement.Closed;
 
     /// <summary>
     /// How far the LEDs of a fixture reach, which is not always its rectangle.
@@ -120,12 +342,8 @@ public static class LedGeometry
     /// edge-on collapses the other way, onto a vertical line. Across such a fixture there
     /// is nothing to set - what it covers there is decided by the sampling area alone.
     /// </summary>
-    public static (double Width, double Height) LedSpread(Fixture f) => f.Arrangement switch
-    {
-        Arrangement.Point => (0, 0),
-        Arrangement.Strip => (f.Width, 0),
-        _ => (f.EdgeOn ? 0 : f.Width, f.Height)
-    };
+    public static (double Width, double Height) LedSpread(Fixture f) =>
+        (HasWidth(f) ? f.Width : 0, HasHeight(f) ? f.Height : 0);
 
     /// <summary>
     /// The outline of a fixture as it is shown and grabbed: where the LEDs reach, plus the
@@ -134,17 +352,24 @@ public static class LedGeometry
     /// The margin is the sampling value on every side, so a flat fixture ends up exactly as
     /// wide across as the sampling covers. That is not half of it by accident: the painting
     /// takes u ± radius around each LED, so the patch really is twice the number shown.
+    ///
+    /// With the sampling taken from the size of the fixture the rectangle is the outline
+    /// itself, and every fixture has both sides to set.
     /// </summary>
-    public static (double Width, double Height) BoxSize(Fixture f, double reachMm)
+    public static (double Width, double Height) BoxSize(Fixture f, Scene scene) =>
+        scene.SampleBySize ? (f.Width, f.Height) : MarginBox(f, scene.SampleRadiusMm);
+
+    /// <summary>The outline in the usual mode: where the LEDs reach, plus the margin on every side.</summary>
+    public static (double Width, double Height) MarginBox(Fixture f, double reachMm)
     {
         var (w, h) = LedSpread(f);
         return (w + 2 * reachMm, h + 2 * reachMm);
     }
 
     /// <summary>The corners of that box on the scene, for drawing and for hit testing.</summary>
-    public static Point[] BoxCorners(Fixture f, double reachMm)
+    public static Point[] BoxCorners(Fixture f, Scene scene)
     {
-        var (w, h) = BoxSize(f, reachMm);
+        var (w, h) = BoxSize(f, scene);
         return Rect(f, w / 2, h / 2);
     }
 
@@ -183,10 +408,10 @@ public static class LedGeometry
     }
 
     /// <summary>Whether the point lands on the fixture as it is drawn, margin included.</summary>
-    public static bool HitTest(Fixture f, Point scene, double reachMm)
+    public static bool HitTest(Fixture f, Point at, Scene scene)
     {
-        var p = ToLocal(f, scene);
-        var (w, h) = BoxSize(f, reachMm);
+        var p = ToLocal(f, at);
+        var (w, h) = BoxSize(f, scene);
         return Math.Abs(p.X) <= w / 2 && Math.Abs(p.Y) <= h / 2;
     }
 }

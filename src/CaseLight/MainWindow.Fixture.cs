@@ -52,6 +52,10 @@ public sealed partial class MainWindow
             Height = 120
         };
 
+        // при выборке по размеру фигуры прямоугольник — вся рамка, и полоса иначе вышла бы толщиной 120 мм
+        if (_scene.SampleBySize)
+            (f.Width, f.Height) = LedGeometry.MarginBox(f, _scene.SampleRadiusMm);
+
         // Bind to something real straight away when possible: an unbound fixture has no
         // LED count, so it would draw as an empty rectangle and look broken.
         var first = _hub.Devices.FirstOrDefault();
@@ -276,8 +280,14 @@ public sealed partial class MainWindow
         p.Children.Add(Ui.NumBox(Loc.T("fixture.y"), f.CenterY, v => { f.CenterY = v; Touch(); AutoFit(); }));
         // Only the dimensions the arrangement actually has. Across a strip, or across a
         // ring standing edge-on, the fixture is as wide as the sampling area covers, and a
-        // field for it would be a number that changes nothing.
-        if (f.Arrangement == Arrangement.Strip)
+        // field for it would be a number that changes nothing. With the sampling taken from
+        // the size of the fixture both sides are the area read, and both are set.
+        if (_scene.SampleBySize)
+        {
+            p.Children.Add(Ui.NumBox(Loc.T("fixture.width"), f.Width, v => { f.Width = Math.Max(5, v); Touch(); AutoFit(); }));
+            p.Children.Add(Ui.NumBox(Loc.T("fixture.height"), f.Height, v => { f.Height = Math.Max(5, v); Touch(); AutoFit(); }));
+        }
+        else if (f.Arrangement == Arrangement.Strip)
         {
             p.Children.Add(Ui.NumBox(Loc.T("fixture.length"), f.Width, v => { f.Width = Math.Max(5, v); Touch(); AutoFit(); },
                 Loc.T("fixture.length.strip.note")));
@@ -647,6 +657,18 @@ public sealed partial class MainWindow
         };
         panel.Children.Add(Ui.Labeled(Loc.T("test.shape"), shapeBox));
 
+        var modeBox = new ComboBox { Margin = new Thickness(0, 2, 0, 8) };
+        modeBox.Items.Add(Loc.T("test.mode.area"));
+        modeBox.Items.Add(Loc.T("test.mode.led"));
+        modeBox.SelectedIndex = _scene.TestByArea ? 0 : 1;
+        modeBox.SelectionChanged += (_, _) =>
+        {
+            _scene.TestByArea = modeBox.SelectedIndex == 0;
+            PushTestPatch();
+            Touch();
+        };
+        panel.Children.Add(Ui.Labeled(Loc.T("test.mode"), modeBox, Loc.T("test.mode.note")));
+
         panel.Children.Add(Ui.Slider(Loc.T("test.size"), _scene.TestSizeMm, 20, 1200, 10, v =>
         {
             _scene.TestSizeMm = v;
@@ -783,6 +805,7 @@ public sealed partial class MainWindow
             CenterY = _view.TestCenter.Y,
             SizeMm = _scene.TestSizeMm,
             Circle = _scene.TestShape == TestShape.Circle,
+            ByArea = _scene.TestByArea,
             R = c.R,
             G = c.G,
             B = c.B
