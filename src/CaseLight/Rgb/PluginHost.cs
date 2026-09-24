@@ -13,17 +13,29 @@ namespace CaseLight.Rgb;
 /// <summary>
 /// Finds, loads and runs the plugins that bring devices OpenRGB does not drive.
 ///
-/// A plugin is a folder under <see cref="Root"/> with its DLLs. Nothing in it is loaded
-/// until the plugin is switched on: loading a DLL runs its code, and a folder that happens
-/// to be there is not a reason to run anything. A plugin once loaded stays loaded until the
-/// program exits - switching it off disposes it and drops its devices, but .NET does not
-/// unload an assembly that is still referenced from anywhere, and a half-unloaded one is
-/// worse than a loaded one doing nothing.
+/// A plugin is a folder with its DLLs under one of <see cref="Roots"/>. Nothing in it is
+/// loaded until the plugin is switched on: loading a DLL runs its code, and a folder that
+/// happens to be there is not a reason to run anything. A plugin once loaded stays loaded
+/// until the program exits - switching it off disposes it and drops its devices, but .NET
+/// does not unload an assembly that is still referenced from anywhere, and a half-unloaded
+/// one is worse than a loaded one doing nothing.
 /// </summary>
 public sealed class PluginHost : IDisposable
 {
-    /// <summary>The plugins folder, next to the program.</summary>
-    public static string Root => Path.Combine(AppContext.BaseDirectory, "plugins");
+    /// <summary>
+    /// The plugins folder next to the settings. It is always writable and survives replacing
+    /// the program, which is why it comes first.
+    /// </summary>
+    public static string UserRoot => Path.Combine(CaseLight.Model.Scene.Folder, "plugins");
+
+    /// <summary>The plugins folder next to the program, for a plugin shipped along with it.</summary>
+    public static string AppRoot => Path.Combine(AppContext.BaseDirectory, "plugins");
+
+    /// <summary>
+    /// Where plugins are looked for, in order. A folder name found in both is taken from the
+    /// first: the copy next to the settings is the one the user put there.
+    /// </summary>
+    public static string[] Roots => [UserRoot, AppRoot];
 
     /// <summary>One folder of the plugins folder, and what became of it.</summary>
     public sealed class Entry
@@ -55,14 +67,22 @@ public sealed class PluginHost : IDisposable
     }
 
     /// <summary>
-    /// Looks through the plugins folder again. Plugins already running stay as they are;
+    /// Looks through the plugins folders again. Plugins already running stay as they are;
     /// a folder that has gone is stopped.
     /// </summary>
     public void Scan()
     {
-        string[] folders;
-        try { folders = Directory.Exists(Root) ? Directory.GetDirectories(Root) : Array.Empty<string>(); }
-        catch { folders = Array.Empty<string>(); }
+        var byName = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var root in Roots)
+        {
+            string[] found;
+            try { found = Directory.Exists(root) ? Directory.GetDirectories(root) : Array.Empty<string>(); }
+            catch { found = Array.Empty<string>(); }
+
+            foreach (var folder in found) byName.TryAdd(Path.GetFileName(folder), folder);
+        }
+
+        var folders = byName.Values.ToArray();
 
         lock (_gate)
         {

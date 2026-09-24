@@ -883,11 +883,15 @@ public sealed partial class MainWindow : Window
                 panel.Children.Add(Ui.Warning(name + ": " + problem));
         }
 
-        try { System.IO.Directory.CreateDirectory(PluginHost.Root); }
-        catch { /* папка программы бывает закрыта для записи, путь всё равно показывается */ }
+        // Папка у настроек заводится сразу, чтобы ссылке было куда вести. Рядом с программой
+        // ничего не создаётся: там папка плагинов бывает, только если её положили вместе с exe.
+        try { System.IO.Directory.CreateDirectory(PluginHost.UserRoot); }
+        catch { /* путь показывается и без папки */ }
 
         panel.Children.Add(Ui.Header(Loc.T("plugins.folder"), Loc.T("plugins.folder.note")));
-        panel.Children.Add(Ui.PathLink(PluginHost.Root));
+        panel.Children.Add(Ui.PathLink(PluginHost.UserRoot));
+        if (System.IO.Directory.Exists(PluginHost.AppRoot))
+            panel.Children.Add(Ui.PathLink(PluginHost.AppRoot));
         panel.Children.Add(Ui.Row(Ui.Btn(Loc.T("plugins.rescan"), () =>
         {
             _plugins.Scan();
