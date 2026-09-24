@@ -6,7 +6,8 @@ using System.Threading;
 namespace CaseLight.Rgb;
 
 /// <summary>One zone of a controller, from its protocol 6 description.</summary>
-public sealed record ControllerZone(string Name, int LedCount);
+/// <param name="Layout">Where each LED sits, from the zone's matrix map; null if the zone has none.</param>
+public sealed record ControllerZone(string Name, int LedCount, System.Windows.Rect[]? Layout);
 
 /// <summary>The parts of a controller's protocol 6 description the program uses.</summary>
 public sealed record ControllerDescription(uint Id, int Type, string Name, string Location, int LedCount, ControllerZone[] Zones);
@@ -246,7 +247,7 @@ public sealed class ServerChannel : IDisposable
             c.U32();                            // leds min
             c.U32();                            // leds max
             int count = (int)c.U32();
-            c.Skip(c.U16());                    // matrix map, size in bytes
+            var layout = ReadMatrix(c, count);
 
             int segments = c.U16();
             for (int s = 0; s < segments; s++)
@@ -265,7 +266,7 @@ public sealed class ServerChannel : IDisposable
             for (int m = 0; m < zoneModes; m++) SkipMode(c);
             c.Str();                            // display name
 
-            zones[z] = new ControllerZone(zoneName, count);
+            zones[z] = new ControllerZone(zoneName, count, layout);
         }
 
         int leds = c.U16();
@@ -281,6 +282,27 @@ public sealed class ServerChannel : IDisposable
         c.Skip((int)c.U32());                   // device configuration
 
         return c.AtEnd ? new ControllerDescription(id, type, name, location, leds, zones) : null;
+    }
+
+    /// <summary>
+    /// A zone's matrix map: its size in bytes, then height, width and a cell per LED index.
+    /// Read in full even when it describes nothing usable, so the fields after it stay in place.
+    /// </summary>
+    static System.Windows.Rect[]? ReadMatrix(Cursor c, int ledCount)
+    {
+        int size = c.U16();
+        if (size == 0) return null;
+        if (size < 8) { c.Skip(size); return null; }
+
+        int height = (int)c.U32();
+        int width = (int)c.U32();
+        int cells = (size - 8) / 4;
+
+        var map = new uint[cells];
+        for (int i = 0; i < cells; i++) map[i] = c.U32();
+        c.Skip(size - 8 - 4 * cells);
+
+        return ZoneLayout.FromMatrix(height, width, map, ledCount);
     }
 
     static void SkipMode(Cursor c)

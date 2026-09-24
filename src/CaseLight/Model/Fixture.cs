@@ -1,4 +1,5 @@
 using System;
+using System.Linq;
 using System.Text.Json.Serialization;
 
 using CaseLight.Core.Text;
@@ -19,7 +20,14 @@ public enum Arrangement
     Closed,
 
     /// <summary>Everything at one spot - a logo, a lit badge, a DRAM module seen as a whole.</summary>
-    Point
+    Point,
+
+    /// <summary>
+    /// LEDs spread over an area, placed where the device says they are: the keys of a
+    /// keyboard, a panel. The positions are copied into <see cref="Fixture.Layout"/>; a
+    /// device that gives none gets a grid in LED order.
+    /// </summary>
+    Matrix
 }
 
 /// <summary>
@@ -112,6 +120,15 @@ public sealed class Fixture
     /// </summary>
     public double ContourAspect { get; set; } = 1.0;
 
+    /// <summary>
+    /// Where each LED of a matrix sits inside the rectangle, as [x, y] in 0..1, one per LED of
+    /// the binding. Null for the other arrangements and for a device without a layout.
+    ///
+    /// Kept in the fixture rather than asked from the device each time: the canvas has to
+    /// draw the scene while the OpenRGB server is down, and it is down often enough.
+    /// </summary>
+    public double[][]? Layout { get; set; }
+
     /// <summary>Purely cosmetic, so fixtures can be told apart on the canvas.</summary>
     public string Tint { get; set; } = "#4C8DFF";
 
@@ -176,6 +193,7 @@ public sealed class Fixture
     {
         var copy = (Fixture)MemberwiseClone();
         copy.Binding = Binding.Clone();
+        copy.Layout = Layout?.Select(p => (double[])p.Clone()).ToArray();
         return copy;
     }
 

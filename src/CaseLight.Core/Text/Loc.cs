@@ -20,7 +20,7 @@ public static class Loc
     /// silently shadowed newly reworded labels, so a mismatched version rewrites it. Only
     /// the two built-in files are rewritten; added languages are left alone.
     /// </summary>
-    const string Version = "18";
+    const string Version = "19";
 
     /// <summary>
     /// Bookkeeping entries rather than translated text: the version a file was written
@@ -430,6 +430,8 @@ public static class Loc
         ["fixture.arr.strip"] = "Полоса — у ленты есть два конца",
         ["fixture.arr.closed"] = "Замкнутое — кольцо или рамка",
         ["fixture.arr.point"] = "Точка — всё светится в одном месте",
+        ["fixture.arr.matrix"] = "Матрица — диоды по площади, как на клавиатуре",
+        ["fixture.matrix.grid"] = "Устройство не сообщает, где стоят его диоды, поэтому они разложены сеткой по порядку, слева направо и сверху вниз.",
         ["fixture.shape"] = "Форма",
         ["fixture.round"] = "Контур круглый",
         ["fixture.aspect"] = "Пропорции рамки",
@@ -682,6 +684,8 @@ public static class Loc
         ["fixture.arr.strip"] = "Strip — a run with two ends",
         ["fixture.arr.closed"] = "Closed — a ring or a frame",
         ["fixture.arr.point"] = "Point — everything lights in one place",
+        ["fixture.arr.matrix"] = "Matrix — LEDs over an area, as on a keyboard",
+        ["fixture.matrix.grid"] = "The device does not report where its LEDs are, so they are laid out as a grid in order, left to right and top to bottom.",
         ["fixture.shape"] = "Shape",
         ["fixture.round"] = "Round contour",
         ["fixture.aspect"] = "Frame proportions",

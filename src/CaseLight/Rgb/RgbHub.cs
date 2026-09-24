@@ -10,7 +10,9 @@ using CaseLight.Core.Text;
 namespace CaseLight.Rgb;
 
 /// <summary>One zone of a controller, as the UI needs to see it.</summary>
-public sealed record ZoneInfo(int Index, string Name, int LedCount, int FirstGlobalLed);
+/// <param name="Layout">Where each LED of the zone sits, if the device says (<see cref="ZoneLayout"/>).</param>
+public sealed record ZoneInfo(int Index, string Name, int LedCount, int FirstGlobalLed,
+                              System.Windows.Rect[]? Layout = null);
 
 /// <summary>One controller, as the UI needs to see it.</summary>
 public sealed record DeviceInfo(int Index, string Name, string Location, string Type,
@@ -325,7 +327,7 @@ public sealed class RgbHub : IDisposable
             int running = 0;
             for (int z = 0; z < zones.Length; z++)
             {
-                zones[z] = new ZoneInfo(z, d.Zones[z].Name, d.Zones[z].LedCount, running);
+                zones[z] = new ZoneInfo(z, d.Zones[z].Name, d.Zones[z].LedCount, running, d.Zones[z].Layout);
                 running += d.Zones[z].LedCount;
             }
 
@@ -353,7 +355,7 @@ public sealed class RgbHub : IDisposable
             int running = 0;
             for (int z = 0; z < d.Zones.Length; z++)
             {
-                zones.Add(new ZoneInfo(z, d.Zones[z].Name, (int)d.Zones[z].LedCount, running));
+                zones.Add(new ZoneInfo(z, d.Zones[z].Name, (int)d.Zones[z].LedCount, running, LibraryLayout(d.Zones[z])));
                 running += (int)d.Zones[z].LedCount;
             }
 
@@ -362,6 +364,21 @@ public sealed class RgbHub : IDisposable
 
         _ids = null;
         Devices = list.ToArray();
+    }
+
+    /// <summary>The zone's matrix map as the library read it, turned into a layout.</summary>
+    static System.Windows.Rect[]? LibraryLayout(OpenRGB.NET.Zone zone)
+    {
+        var matrix = zone.MatrixMap?.Matrix;
+        if (matrix == null) return null;
+
+        int height = matrix.GetLength(0), width = matrix.GetLength(1);
+        var map = new uint[height * width];
+        for (int row = 0; row < height; row++)
+        for (int col = 0; col < width; col++)
+            map[row * width + col] = matrix[row, col];
+
+        return ZoneLayout.FromMatrix(height, width, map, (int)zone.LedCount);
     }
 
     /// <summary>Whether the server takes rescan requests; see <see cref="ServerChannel"/>.</summary>

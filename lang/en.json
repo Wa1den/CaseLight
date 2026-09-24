@@ -176,6 +176,8 @@
   "fixture.arr.strip": "Strip — a run with two ends",
   "fixture.arr.closed": "Closed — a ring or a frame",
   "fixture.arr.point": "Point — everything lights in one place",
+  "fixture.arr.matrix": "Matrix — LEDs over an area, as on a keyboard",
+  "fixture.matrix.grid": "The device does not report where its LEDs are, so they are laid out as a grid in order, left to right and top to bottom.",
   "fixture.shape": "Shape",
   "fixture.round": "Round contour",
   "fixture.aspect": "Frame proportions",
@@ -227,5 +229,5 @@
   "unit.s": " s",
   "off": "off",
   "_name": "English",
-  "_version": "12"
+  "_version": "19"
 }
