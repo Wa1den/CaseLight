@@ -1212,6 +1212,9 @@ public sealed class CasePainter : IDisposable
         _hasPluginTargets = _deviceDivider.Keys.Any(RgbHub.IsPluginIndex);
         _hasServerTargets = _deviceDivider.Keys.Any(d => !RgbHub.IsPluginIndex(d));
 
+        // устройство плагина, с которого ушла последняя фигура, иначе держало бы последний кадр
+        _hub.ReleasePlugins(_deviceDivider.Keys);
+
         _resolvedGeneration = _hub.Generation;
         _blankUnused = true;
     }

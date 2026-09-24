@@ -92,9 +92,10 @@ public interface ILightDevice
 
     /// <summary>
     /// Stops driving the device and lets it go back to whatever it shows on its own. Called
-    /// when the program exits and when the plugin is switched off. Stopping the painting is
-    /// not a release: the device gets a black frame, as every other device does, and keeps
-    /// it; a later <see cref="Write"/> takes the device again.
+    /// where other devices are blacked out - the painting stopped or paused, the program
+    /// exiting - and when no fixture drives the device any more or the plugin is switched
+    /// off. Called again while already released; a later <see cref="Write"/> takes the
+    /// device again.
     /// </summary>
     void Release();
 }
