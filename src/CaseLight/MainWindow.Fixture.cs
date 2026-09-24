@@ -239,6 +239,7 @@ public sealed partial class MainWindow
             f.Binding.ZoneIndex = 0;
             f.Binding.FirstLed = 0;
             f.Binding.LedCount = dev.Zones.FirstOrDefault()?.LedCount ?? 0;
+            TakeLayout(f);
 
             BuildFixturePanel();
             Touch();
@@ -259,19 +260,25 @@ public sealed partial class MainWindow
                 f.Binding.ZoneIndex = zoneBox.SelectedIndex;
                 f.Binding.FirstLed = 0;
                 f.Binding.LedCount = info.Zones[zoneBox.SelectedIndex].LedCount;
+                TakeLayout(f);
 
                 BuildFixturePanel();
                 Touch();
             };
             p.Children.Add(Ui.Labeled(Loc.T("fixture.zone"), zoneBox));
+
+            // устройство плагина может сообщить, что кадры на нём не видны, и почему
+            string problem = "";
+            try { problem = info.Plugin?.Problem ?? ""; } catch { /* сломанный плагин показан в своём разделе */ }
+            if (problem != "") p.Children.Add(Ui.Warning(problem));
         }
         else
         {
             p.Children.Add(Ui.Note(string.Format(Loc.T("fixture.missing"), f.Binding.DeviceName)));
         }
 
-        p.Children.Add(Ui.IntBox(Loc.T("fixture.first"), f.Binding.FirstLed, v => { f.Binding.FirstLed = Math.Max(0, v); Touch(); }));
-        p.Children.Add(Ui.IntBox(Loc.T("fixture.count"), f.Binding.LedCount, v => { f.Binding.LedCount = Math.Max(0, v); Touch(); },
+        p.Children.Add(Ui.IntBox(Loc.T("fixture.first"), f.Binding.FirstLed, v => { f.Binding.FirstLed = Math.Max(0, v); TakeLayout(f); Touch(); }));
+        p.Children.Add(Ui.IntBox(Loc.T("fixture.count"), f.Binding.LedCount, v => { f.Binding.LedCount = Math.Max(0, v); TakeLayout(f); Touch(); },
             Loc.T("fixture.count.note")));
 
         // ---- место
@@ -311,20 +318,30 @@ public sealed partial class MainWindow
         kindBox.Items.Add(Loc.T("fixture.arr.strip"));
         kindBox.Items.Add(Loc.T("fixture.arr.closed"));
         kindBox.Items.Add(Loc.T("fixture.arr.point"));
+        kindBox.Items.Add(Loc.T("fixture.arr.matrix"));
         kindBox.SelectedIndex = f.Arrangement switch
         {
             Arrangement.Strip => 0,
             Arrangement.Closed => 1,
+            Arrangement.Matrix => 3,
             _ => 2
         };
         kindBox.SelectionChanged += (_, _) =>
         {
-            f.Arrangement = kindBox.SelectedIndex switch
+            var chosen = kindBox.SelectedIndex switch
             {
                 0 => Arrangement.Strip,
                 1 => Arrangement.Closed,
+                3 => Arrangement.Matrix,
                 _ => Arrangement.Point
             };
+
+            // список поднимает событие и при входе в дерево, а подгонка высоты нужна только
+            // при настоящей смене формы
+            if (chosen == f.Arrangement) return;
+
+            f.Arrangement = chosen;
+            TakeLayout(f, fitHeight: true);
             BuildFixturePanel();
             Touch();
         };
@@ -341,7 +358,10 @@ public sealed partial class MainWindow
                     format: DescribeAspect));
         }
 
-        if (f.Arrangement != Arrangement.Point)
+        if (f.Arrangement == Arrangement.Matrix && f.Layout == null)
+            p.Children.Add(Ui.Note(Loc.T("fixture.matrix.grid")));
+
+        if (f.Arrangement is Arrangement.Strip or Arrangement.Closed)
         {
             p.Children.Add(AnchorRow(f));
             p.Children.Add(Ui.Check(Loc.T("fixture.reverse"), f.Reverse, v => { f.Reverse = v; Touch(); }));
@@ -353,6 +373,45 @@ public sealed partial class MainWindow
                 Loc.T("fixture.edgeon.note")));
         }
     }
+    /// <summary>
+    /// Copies the positions of the fixture's LEDs from the device into a matrix fixture.
+    ///
+    /// Taken again whenever the binding changes, since a different range of LEDs has a
+    /// different shape. A device missing from the list leaves the stored layout alone: the
+    /// server is often down, and the layout is still right. A device that has no layout
+    /// clears it, and the LEDs go on a grid.
+    /// </summary>
+    /// <param name="fitHeight">
+    /// Also set the height so the rectangle has the proportions of the layout. Done when the
+    /// arrangement is switched to a matrix: until then the rectangle was sized for a strip
+    /// or a ring, and a keyboard squeezed into it would read the wrong part of the screen.
+    /// </param>
+    void TakeLayout(Fixture f, bool fitHeight = false)
+    {
+        if (f.Arrangement != Arrangement.Matrix) return;
+
+        var info = _hub.Find(f.Binding);
+        if (info == null) return;
+
+        var zone = f.Binding.ZoneIndex >= 0 && f.Binding.ZoneIndex < info.Zones.Length ? info.Zones[f.Binding.ZoneIndex] : null;
+        var b = f.Binding;
+
+        if (zone?.Layout is not { } cells || b.FirstLed < 0 || b.LedCount <= 0 || b.FirstLed + b.LedCount > cells.Length)
+        {
+            f.Layout = null;
+            return;
+        }
+
+        var slice = cells.Skip(b.FirstLed).Take(b.LedCount).ToArray();
+        f.Layout = LedGeometry.FitLayout(slice);
+
+        if (fitHeight && f.Layout != null)
+        {
+            var box = slice.Aggregate(Rect.Union);
+            f.Height = Math.Max(5, f.Width * box.Height / box.Width);
+        }
+    }
+
     /// <summary>
     /// The colour settings of one fixture, the same set the scene has.
     ///

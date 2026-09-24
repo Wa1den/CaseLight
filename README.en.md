@@ -55,8 +55,11 @@ dotnet publish src/CaseLight/CaseLight.csproj -c Release -r win-x64 --self-conta
 2. Place the fixture on the plan according to the position of the device relative to the
    monitor. Monitor dimensions are entered for the visible part of the panel: about 597 by
    336 mm for a 27" 16:9 display.
-3. Choose the arrangement: a strip, a closed contour (round or rectangular), or a point for
-   a device that lights up as a whole.
+3. Choose the arrangement: a strip, a closed contour (round or rectangular), a point for
+   a device that lights up as a whole, or a matrix for LEDs spread over an area, as on a
+   keyboard. The positions of a matrix's LEDs come from the device: from the zone's matrix
+   map in OpenRGB or from a plugin. If the device does not report them, the LEDs are laid
+   out as a grid in order.
 4. For a closed contour, set the starting LED. The button next to it lights only the
    selected LED, which makes it possible to identify the bottom one visually.
 5. For fans facing the viewer edge-on, tick "edge-on". The ring is then reduced to a
@@ -186,6 +189,43 @@ were used to find out which control paths were available.
 * `RgbCalibrator` measures the length of a strip on a header.
 * `LampProbe` lists the devices available through the HID LampArray in Windows itself,
   without OpenRGB.
+
+## Plugins
+
+Devices that OpenRGB does not have are added through plugins. A plugin is a folder with
+its DLLs in `%AppData%\CaseLight\plugins\` or in `plugins` next to the program; if a
+folder of the same name is in both places, the one next to the settings is taken. A plugin
+found there is switched on in the «Plugins» section, and its code is not loaded before
+that. The devices of a plugin appear in a fixture's device list next to the OpenRGB
+controllers and work without the server running.
+
+A plugin of your own is a .NET 9 library referencing the contract assembly
+[CaseLight.Plugins](src/CaseLight.Plugins/PluginApi.cs). It holds two interfaces:
+
+* `ILightPlugin` looks for devices and reports when their list changes. The program
+  creates it with a parameterless constructor and calls `Start`.
+* `ILightDevice` is one device: the name fixtures are bound by, the zones with their LED
+  counts and, if the LEDs have positions, their layout. A frame arrives in `Write`, three
+  bytes per LED. The method must not wait for the device, and the frame stays on it until
+  the next one: a still screen produces no new frames. `Problem` is where the plugin says
+  why the frames do not show on the device; the window displays that text.
+
+The reference to the contract is made with `Private="false"`: at run time the plugin gets
+the program's own assembly, and a copy next to it would give a second interface the
+program does not know. A plugin built against another contract version
+(`PluginApi.Version`) is not loaded.
+
+An example is the plugin for the NuPhy Air75 HE keyboard in [plugins/NuPhy](plugins/NuPhy).
+It sets the colour of every key through the vendor HID interface and gives the key layout
+for the matrix arrangement. The protocol was worked out from the NuPhyIO application. The
+frames show while key lighting is on in NuPhyIO with a brightness above zero. The plugin
+is not part of the releases. A ready build is in [prebuilt/plugins/NuPhy](prebuilt/plugins/NuPhy):
+the folder is copied as a whole into `%AppData%\CaseLight\plugins\`. Building from source
+straight into the same place:
+
+```
+dotnet publish plugins/NuPhy -c Release -o "%AppData%\CaseLight\plugins\NuPhy"
+```
 
 ## Licence
 

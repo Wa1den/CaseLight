@@ -318,6 +318,9 @@ public sealed class SceneView : FrameworkElement
         var leds = LedGeometry.World(f, Scene.SampleBySize);
         double dot = Math.Clamp(2.2 * _scale, 1.6, 5.0);
 
+        // у матрицы начало не выбирается, отмечается первый диод устройства
+        int anchor = f.Arrangement == Arrangement.Matrix ? 0 : f.AnchorLed;
+
         for (int i = 0; i < leds.Length; i++)
         {
             var p = ToScreen(leds[i]);
@@ -325,12 +328,12 @@ public sealed class SceneView : FrameworkElement
             // The anchor and its immediate neighbours are marked: together they show both
             // where the run starts and which way round it goes - the two things that are
             // impossible to guess and easy to get backwards.
-            Brush brush = i == f.AnchorLed
+            Brush brush = i == anchor
                 ? Brushes.OrangeRed
-                : IsNear(f, i, 3) ? Brushes.Orange
+                : IsNear(f, anchor, i, 3) ? Brushes.Orange
                 : new SolidColorBrush(tint);
 
-            dc.DrawEllipse(brush, null, p, i == f.AnchorLed ? dot * 1.7 : dot, i == f.AnchorLed ? dot * 1.7 : dot);
+            dc.DrawEllipse(brush, null, p, i == anchor ? dot * 1.7 : dot, i == anchor ? dot * 1.7 : dot);
         }
 
         // Just the name: the LED count is in the fixture panel and on the list, and on a
@@ -341,13 +344,13 @@ public sealed class SceneView : FrameworkElement
     }
 
     /// <summary>True for the few LEDs just after the anchor, walked the way the fixture is walked.</summary>
-    static bool IsNear(Fixture f, int i, int within)
+    static bool IsNear(Fixture f, int anchor, int i, int within)
     {
         int n = f.LedCount;
         if (n == 0) return false;
 
-        int step = i - f.AnchorLed;
-        if (f.Reverse) step = -step;
+        int step = i - anchor;
+        if (f.Reverse && f.Arrangement != Arrangement.Matrix) step = -step;
         int k = ((step % n) + n) % n;
         return k > 0 && k <= within;
     }

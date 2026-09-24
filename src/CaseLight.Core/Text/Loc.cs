@@ -20,7 +20,7 @@ public static class Loc
     /// silently shadowed newly reworded labels, so a mismatched version rewrites it. Only
     /// the two built-in files are rewritten; added languages are left alone.
     /// </summary>
-    const string Version = "18";
+    const string Version = "19";
 
     /// <summary>
     /// Bookkeeping entries rather than translated text: the version a file was written
@@ -253,6 +253,15 @@ public static class Loc
 
         ["tab.main"] = "Основное",
         ["tab.openrgb"] = "OpenRGB",
+        ["tab.plugins"] = "Плагины",
+        ["plugins.list"] = "Найденные плагины",
+        ["plugins.list.note"] = "Плагин добавляет устройства, которых нет в OpenRGB. Включение запускает код из папки плагина; его устройства появляются в списке устройств фигуры.",
+        ["plugins.none"] = "Плагинов нет. Каждый плагин лежит отдельной папкой в папке плагинов.",
+        ["plugins.off"] = "Выключен.",
+        ["plugins.devices"] = "Работает, устройств: {0}.",
+        ["plugins.folder"] = "Папки плагинов",
+        ["plugins.folder.note"] = "Плагин копируется папкой целиком в папку рядом с настройками или в plugins рядом с программой. Если папка с тем же именем есть в обеих, берётся та, что рядом с настройками. Новая папка появится в списке после «Искать снова».",
+        ["plugins.rescan"] = "Искать снова",
         ["tab.devices"] = "Устройства",
         ["tab.capture"] = "Захват",
         ["tab.crop"] = "Кадрирование",
@@ -430,6 +439,8 @@ public static class Loc
         ["fixture.arr.strip"] = "Полоса — у ленты есть два конца",
         ["fixture.arr.closed"] = "Замкнутое — кольцо или рамка",
         ["fixture.arr.point"] = "Точка — всё светится в одном месте",
+        ["fixture.arr.matrix"] = "Матрица — диоды по площади, как на клавиатуре",
+        ["fixture.matrix.grid"] = "Устройство не сообщает, где стоят его диоды, поэтому они разложены сеткой по порядку, слева направо и сверху вниз.",
         ["fixture.shape"] = "Форма",
         ["fixture.round"] = "Контур круглый",
         ["fixture.aspect"] = "Пропорции рамки",
@@ -505,6 +516,15 @@ public static class Loc
 
         ["tab.main"] = "General",
         ["tab.openrgb"] = "OpenRGB",
+        ["tab.plugins"] = "Plugins",
+        ["plugins.list"] = "Plugins found",
+        ["plugins.list.note"] = "A plugin adds devices that OpenRGB does not have. Switching it on runs the code in the plugin's folder; its devices then appear in a fixture's device list.",
+        ["plugins.none"] = "No plugins. Each plugin is a folder of its own in the plugins folder.",
+        ["plugins.off"] = "Off.",
+        ["plugins.devices"] = "Running, devices: {0}.",
+        ["plugins.folder"] = "Plugins folders",
+        ["plugins.folder.note"] = "A plugin is copied as a whole folder into the folder next to the settings or into plugins next to the program. If a folder of the same name is in both, the one next to the settings is taken. A new folder appears in the list after «Search again».",
+        ["plugins.rescan"] = "Search again",
         ["tab.devices"] = "Devices",
         ["tab.capture"] = "Capture",
         ["tab.crop"] = "Cropping",
@@ -682,6 +702,8 @@ public static class Loc
         ["fixture.arr.strip"] = "Strip — a run with two ends",
         ["fixture.arr.closed"] = "Closed — a ring or a frame",
         ["fixture.arr.point"] = "Point — everything lights in one place",
+        ["fixture.arr.matrix"] = "Matrix — LEDs over an area, as on a keyboard",
+        ["fixture.matrix.grid"] = "The device does not report where its LEDs are, so they are laid out as a grid in order, left to right and top to bottom.",
         ["fixture.shape"] = "Shape",
         ["fixture.round"] = "Round contour",
         ["fixture.aspect"] = "Frame proportions",

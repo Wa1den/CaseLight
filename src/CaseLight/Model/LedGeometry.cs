@@ -28,6 +28,10 @@ public static class LedGeometry
         var points = new Point[n];
         if (n == 0) return points;
 
+        // У матрицы порядок обхода задан самим устройством: начало и направление к ней не
+        // применяются, как и вид с торца.
+        if (f.Arrangement == Arrangement.Matrix) return MatrixPoints(f, n);
+
         for (int i = 0; i < n; i++)
         {
             // Distance from the anchor along the run, wrapped. The anchor is LED zero of
@@ -93,6 +97,55 @@ public static class LedGeometry
     }
 
     static Point StripPoint(int k, int n) => new((k + 0.5) / n, 0.5);
+
+    /// <summary>
+    /// The LEDs of a matrix: from the stored layout while it matches the LED count, otherwise
+    /// a grid filled row by row from the top left, with columns chosen so the cells come out
+    /// close to square in the fixture's rectangle.
+    /// </summary>
+    static Point[] MatrixPoints(Fixture f, int n)
+    {
+        var points = new Point[n];
+
+        if (f.Layout is { } layout && layout.Length == n && layout.All(p => p.Length == 2))
+        {
+            for (int i = 0; i < n; i++) points[i] = new Point(layout[i][0], layout[i][1]);
+            return points;
+        }
+
+        double aspect = Math.Max(f.Width, 1e-6) / Math.Max(f.Height, 1e-6);
+        int cols = Math.Clamp((int)Math.Round(Math.Sqrt(n * aspect)), 1, n);
+        int rows = (n + cols - 1) / cols;
+
+        for (int i = 0; i < n; i++)
+            points[i] = new Point((i % cols + 0.5) / cols, (i / cols + 0.5) / rows);
+
+        return points;
+    }
+
+    /// <summary>
+    /// Turns the rectangles a device gives for its LEDs (<c>ZoneLayout</c>) into
+    /// <see cref="Fixture.Layout"/>: the centre of each, with the box around all of them
+    /// stretched over 0..1.
+    ///
+    /// The box is taken to the outer edges of the rectangles, not to the centres, so a row of
+    /// keys keeps half a key on either side, as LEDs of a strip keep half a step.
+    /// </summary>
+    public static double[][]? FitLayout(IReadOnlyList<Rect> cells)
+    {
+        if (cells.Count == 0) return null;
+
+        double left = cells.Min(c => c.Left), right = cells.Max(c => c.Right);
+        double top = cells.Min(c => c.Top), bottom = cells.Max(c => c.Bottom);
+        double w = right - left, h = bottom - top;
+        if (w <= 0 || h <= 0) return null;
+
+        return cells.Select(c => new[]
+        {
+            (c.Left + c.Width / 2 - left) / w,
+            (c.Top + c.Height / 2 - top) / h
+        }).ToArray();
+    }
 
     /// <summary>
     /// A circle walked from the bottom. At k = 0 the angle is zero and the point is at the
@@ -328,12 +381,12 @@ public static class LedGeometry
     public static bool HasWidth(Fixture f) => f.Arrangement switch
     {
         Arrangement.Point => false,
-        Arrangement.Strip => true,
+        Arrangement.Strip or Arrangement.Matrix => true,
         _ => !f.EdgeOn
     };
 
     /// <summary>Whether the LEDs spread along the fixture's height, in the usual mode.</summary>
-    public static bool HasHeight(Fixture f) => f.Arrangement == Arrangement.Closed;
+    public static bool HasHeight(Fixture f) => f.Arrangement is Arrangement.Closed or Arrangement.Matrix;
 
     /// <summary>
     /// How far the LEDs of a fixture reach, which is not always its rectangle.

@@ -29,6 +29,10 @@ namespace CaseLight;
 public sealed partial class MainWindow : Window
 {
     readonly RgbHub _hub = new();
+    readonly PluginHost _plugins = new();
+
+    /// <summary><see cref="RgbHub.PluginGeneration"/> the window last showed.</summary>
+    int _pluginGenerationShown = -1;
     readonly SceneView _view = new();
     readonly PowerWatcher _power = new();
     readonly DispatcherTimer _ui = new() { Interval = TimeSpan.FromMilliseconds(500) };
@@ -173,6 +177,12 @@ public sealed partial class MainWindow : Window
         _saved = _scene.Clone();
         _painter = new CasePainter(_hub, _scene);
 
+        // до первой сборки страниц: раздел плагинов показывает найденные папки
+        CaseLight.Plugins.PluginApi.Language = Loc.Language;
+        _plugins.Scan();
+        _hub.AttachPlugins(_plugins);
+        _plugins.Apply(_scene.Plugins);
+
         RestoreWindowGeometry();
         Content = BuildLayout();
         SetupChrome();
@@ -279,6 +289,9 @@ public sealed partial class MainWindow : Window
             _painter.Dispose();
             _power.Dispose();
             _hub.Dispose();
+
+            // устройства плагинов возвращаются к своим эффектам: держать кадр после выхода некому
+            _plugins.Dispose();
         };
     }
 
@@ -643,6 +656,7 @@ public sealed partial class MainWindow : Window
 
         BuildGeneralSection();
         BuildOpenRgbSection();
+        BuildPluginsSection();
         BuildDevicesSection();
         BuildCaptureSection();
         BuildCropSection();
@@ -825,6 +839,79 @@ public sealed partial class MainWindow : Window
             v => { _scene.ResumeDelayMs = (int)(v * 1000); Touch(); }, Loc.T("unit.s"),
             Loc.T("power.delay.note")));
     });
+
+    /// <summary>
+    /// Plugins: support for devices the OpenRGB server does not drive, one folder each in the
+    /// plugins folder next to the program.
+    ///
+    /// A plugin found there is not started until its box is ticked: starting it runs its code.
+    /// Its name and description are only known after that, so until then the list shows the
+    /// folder.
+    /// </summary>
+    void BuildPluginsSection() => AddSection(Loc.T("tab.plugins"), "\uEA86", panel =>
+    {
+        panel.Children.Add(Ui.Header(Loc.T("plugins.list"), Loc.T("plugins.list.note")));
+
+        var entries = _plugins.Entries;
+        if (entries.Count == 0) panel.Children.Add(Ui.Note(Loc.T("plugins.none")));
+
+        foreach (var entry in entries)
+        {
+            var plugin = entry.Plugins.FirstOrDefault();
+            string title = plugin == null ? entry.Id : plugin.Name;
+            bool on = _scene.Plugins.Contains(entry.Id, StringComparer.OrdinalIgnoreCase);
+
+            panel.Children.Add(Ui.Check(title, on, v =>
+            {
+                if (_rebuildingUi) return;
+
+                _scene.Plugins = v
+                    ? [.. _scene.Plugins.Where(id => !string.Equals(id, entry.Id, StringComparison.OrdinalIgnoreCase)), entry.Id]
+                    : _scene.Plugins.Where(id => !string.Equals(id, entry.Id, StringComparison.OrdinalIgnoreCase)).ToArray();
+
+                _plugins.Apply(_scene.Plugins);
+                Touch();
+            }, plugin?.Description));
+
+            string state = entry.Error != "" ? entry.Error
+                : !entry.Running ? Loc.T("plugins.off")
+                : string.Format(Loc.T("plugins.devices"), entry.Plugins.Sum(DeviceCount));
+            panel.Children.Add(Ui.Note(state));
+
+            foreach (var running in entry.Plugins)
+            foreach (var (name, problem) in Problems(running))
+                panel.Children.Add(Ui.Warning(name + ": " + problem));
+        }
+
+        // Папка у настроек заводится сразу, чтобы ссылке было куда вести. Рядом с программой
+        // ничего не создаётся: там папка плагинов бывает, только если её положили вместе с exe.
+        try { System.IO.Directory.CreateDirectory(PluginHost.UserRoot); }
+        catch { /* путь показывается и без папки */ }
+
+        panel.Children.Add(Ui.Header(Loc.T("plugins.folder"), Loc.T("plugins.folder.note")));
+        panel.Children.Add(Ui.PathLink(PluginHost.UserRoot));
+        if (System.IO.Directory.Exists(PluginHost.AppRoot))
+            panel.Children.Add(Ui.PathLink(PluginHost.AppRoot));
+        panel.Children.Add(Ui.Row(Ui.Btn(Loc.T("plugins.rescan"), () =>
+        {
+            _plugins.Scan();
+            _plugins.Apply(_scene.Plugins);
+            RebuildSections();
+        })));
+    });
+
+    /// <summary>The devices of a plugin that report a problem, with its text.</summary>
+    static (string Name, string Problem)[] Problems(CaseLight.Plugins.ILightPlugin plugin)
+    {
+        try { return plugin.Devices.Where(d => d.Problem != "").Select(d => (d.Name, d.Problem)).ToArray(); }
+        catch { return []; }
+    }
+
+    static int DeviceCount(CaseLight.Plugins.ILightPlugin plugin)
+    {
+        try { return plugin.Devices.Count; }
+        catch { return 0; }
+    }
 
     void BuildDevicesSection()
     {
@@ -1223,6 +1310,7 @@ public sealed partial class MainWindow : Window
         // CopyFrom keeps the object identity the painter and the canvas already hold, so
         // undoing a drag needs no rewiring - only a redraw.
         _scene.CopyFrom(_saved);
+        _plugins.Apply(_scene.Plugins);
 
         _view.Select(null);
         RebuildSections();
@@ -1262,6 +1350,7 @@ public sealed partial class MainWindow : Window
         {
             var loaded = Scene.Import(dialog.FileName);
             _scene.CopyFrom(loaded);
+            _plugins.Apply(_scene.Plugins);
 
             _view.Select(null);
             RebuildSections();
@@ -1456,7 +1545,7 @@ public sealed partial class MainWindow : Window
 
         // Nothing was asked of the server since before sleep, so the list still counts the
         // devices that were there - the measure a rescan is checked against.
-        int devicesBefore = _hub.Devices.Length;
+        int devicesBefore = _hub.ServerDeviceCount;
 
         // Stop writing before touching the server: a restart would be writing into a dying
         // process.
@@ -1495,7 +1584,7 @@ public sealed partial class MainWindow : Window
 
                 // A restart that came back short is topped up by a rescan, which is seconds,
                 // instead of being left short or restarted again.
-                if (back && _hub.Devices.Length < devicesBefore && _hub.CanRescan)
+                if (back && _hub.ServerDeviceCount < devicesBefore && _hub.CanRescan)
                     back = RescanServer(devicesBefore, out what);
             }
             finally
@@ -1556,7 +1645,7 @@ public sealed partial class MainWindow : Window
             }
 
             what = string.Format(Loc.P("после поиска найдено устройств: {0} из {1}", "devices found after detection: {0} of {1}"),
-                                 _hub.Devices.Length, devicesBefore);
+                                 _hub.ServerDeviceCount, devicesBefore);
 
             // A short list right after waking is a bus still settling, not a device gone:
             // looking again a moment later is quicker than holding every wake back by a pause.
@@ -1703,6 +1792,17 @@ public sealed partial class MainWindow : Window
     /// </summary>
     void PollDevices()
     {
+        // Плагины не зависят от сервера и восстановления после сна. Список забирает и поток
+        // раскраски, поэтому смена замечается по поколению, а не по ответу SyncPlugins.
+        _hub.SyncPlugins();
+        if (_hub.PluginGeneration != _pluginGenerationShown)
+        {
+            _pluginGenerationShown = _hub.PluginGeneration;
+            RebuildSections();
+            BuildFixturePanel();
+            _painter.Invalidate();
+        }
+
         if (_recovering) return;
 
         long now = Environment.TickCount64;
@@ -1744,10 +1844,10 @@ public sealed partial class MainWindow : Window
         if (_settlePolls <= 0 || now - _lastListPoll < 2500) return;
         _lastListPoll = now;
 
-        int before = _hub.Devices.Length;
+        int before = _hub.ServerDeviceCount;
         if (!_hub.TryRefresh()) return;
 
-        if (_hub.Devices.Length != before)
+        if (_hub.ServerDeviceCount != before)
         {
             // still filling up - start the count again rather than settle on a partial list
             _settlePolls = SettlePolls;
@@ -1755,7 +1855,7 @@ public sealed partial class MainWindow : Window
             BuildFixturePanel();
             _painter.Invalidate();
         }
-        else if (_hub.Devices.Length == 0)
+        else if (_hub.ServerDeviceCount == 0)
         {
             Say(Loc.P("OpenRGB подключён, устройств пока нет: идёт поиск.", "OpenRGB connected, no devices yet: still looking."));
         }
@@ -1896,6 +1996,10 @@ public sealed partial class MainWindow : Window
     void ApplyLanguage()
     {
         Loc.Load(_scene.Language);
+
+        // Предупреждения плагинов складываются в момент смены состояния устройства и на
+        // новом языке появятся со следующей сменой; описания перечитываются при пересборке ниже.
+        CaseLight.Plugins.PluginApi.Language = Loc.Language;
 
         Title = Loc.T("app.title");
         _canvasToggle.Content = Loc.T("nav.canvas");
@@ -2079,7 +2183,7 @@ public sealed partial class MainWindow : Window
             if (!_hub.IsConnected) _hub.Connect(force: true);
             else _hub.Refresh();
 
-            int count = _hub.Devices.Length;
+            int count = _hub.ServerDeviceCount;
 
             // Everything that was there before is back: the rest of detection only looks for
             // hardware this machine was not using.

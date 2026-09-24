@@ -439,6 +439,16 @@ public sealed class Scene
     /// </summary>
     public bool OpenRgbAsAdmin { get; set; }
 
+    /// <summary>
+    /// The plugins switched on, by the name of their folder under the plugins folder. Off
+    /// until switched on: starting a plugin runs its code.
+    ///
+    /// An array replaced whole on every change, never edited in place: <see cref="CopyFrom"/>
+    /// copies properties by reference, and a list edited in place would change the applied
+    /// copy behind Cancel along with the live one.
+    /// </summary>
+    public string[] Plugins { get; set; } = [];
+
     // ---- питание ----------------------------------------------------------
 
     public bool OffOnExit { get; set; } = true;
@@ -616,7 +626,8 @@ public sealed class Scene
     /// than a preference.
     ///
     /// The fixtures and the monitor rectangle are the layout itself, measured against the
-    /// case with a ruler; the screen and the language are what the installation is; the
+    /// case with a ruler; the screen, the language and the plugins are what the installation
+    /// is, and switching a plugin off would leave its fixtures without a device; the
     /// window geometry is not edited by hand at all and is written on the way out. Every
     /// other setting is reset by name lookup rather than from a list, so one added later is
     /// covered without anyone having to remember this method.
@@ -625,7 +636,7 @@ public sealed class Scene
     {
         nameof(Fixtures), nameof(Monitor),
         nameof(MonitorDeviceName), nameof(MonitorModel),
-        nameof(Language),
+        nameof(Language), nameof(Plugins),
         nameof(WindowWidth), nameof(WindowHeight), nameof(WindowLeft), nameof(WindowTop),
         nameof(WindowMaximized)
     };

@@ -136,6 +136,14 @@ public static class Ui
         FontSize = TextSize
     };
 
+    /// <summary>A note about something that does not work as set, in the caution colour.</summary>
+    public static TextBlock Warning(string text)
+    {
+        var t = Note(text);
+        t.Foreground = Warn;
+        return t;
+    }
+
     /// <summary>Fixed-width figures, so the statistics block does not shift as values change.</summary>
     public static TextBlock Mono(string text = "") => new()
     {

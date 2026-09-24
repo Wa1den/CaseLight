@@ -8,3 +8,6 @@ dist/
 
 # заметки для Claude Code, живут только локально
 CLAUDE.md
+
+# собранные плагины: в репозитории только dll и deps.json
+prebuilt/**/*.pdb

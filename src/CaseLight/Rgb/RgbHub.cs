@@ -10,11 +10,15 @@ using CaseLight.Core.Text;
 namespace CaseLight.Rgb;
 
 /// <summary>One zone of a controller, as the UI needs to see it.</summary>
-public sealed record ZoneInfo(int Index, string Name, int LedCount, int FirstGlobalLed);
+/// <param name="Layout">Where each LED of the zone sits, if the device says (<see cref="ZoneLayout"/>).</param>
+public sealed record ZoneInfo(int Index, string Name, int LedCount, int FirstGlobalLed,
+                              System.Windows.Rect[]? Layout = null);
 
 /// <summary>One controller, as the UI needs to see it.</summary>
+/// <param name="Plugin">The device of a plugin behind this entry; null for a controller of OpenRGB.</param>
 public sealed record DeviceInfo(int Index, string Name, string Location, string Type,
-                                int LedCount, ZoneInfo[] Zones);
+                                int LedCount, ZoneInfo[] Zones,
+                                CaseLight.Plugins.ILightDevice? Plugin = null);
 
 /// <summary>
 /// The only thing that talks to OpenRGB.
@@ -96,7 +100,7 @@ public sealed class RgbHub : IDisposable
     /// connects at that moment gets an empty list and, if nobody asks again, keeps it
     /// forever. Readiness means devices, not a socket.
     /// </summary>
-    public bool IsReady => _client != null && Devices.Length > 0;
+    public bool IsReady => _client != null && _serverDevices.Length > 0;
     /// <summary>
     /// What the last exchange with the server ended with, kept apart from its wording: the
     /// window can change language at any moment, and a line composed once stayed in the
@@ -110,7 +114,7 @@ public sealed class RgbHub : IDisposable
     public string Status => _state switch
     {
         State.Connected => string.Format(Loc.P("подключено, контроллеров с диодами: {0}",
-                                               "connected, controllers with LEDs: {0}"), Devices.Length),
+                                               "connected, controllers with LEDs: {0}"), _serverDevices.Length),
         State.NoConnection => Loc.P("нет связи с OpenRGB: ", "no connection to OpenRGB: ") + _detail,
         State.Lost => Loc.P("связь потеряна: ", "connection lost: ") + _detail,
         State.ListFailed => Loc.P("не удалось перечитать список устройств: ",
@@ -119,7 +123,122 @@ public sealed class RgbHub : IDisposable
     };
 
     void Report(State state, string detail = "") { _state = state; _detail = detail; }
+
+    /// <summary>
+    /// Every device a fixture can be bound to: the controllers of OpenRGB, then the devices
+    /// of plugins. Bindings go by name, so the two lists never have to be told apart there.
+    /// </summary>
     public DeviceInfo[] Devices { get; private set; } = Array.Empty<DeviceInfo>();
+
+    /// <summary>
+    /// How many controllers the OpenRGB server has. Recovery after sleep and the wait for
+    /// detection compare against this: a plugin device found or lost meanwhile says nothing
+    /// about the server.
+    /// </summary>
+    public int ServerDeviceCount => _serverDevices.Length;
+
+    DeviceInfo[] _serverDevices = Array.Empty<DeviceInfo>();
+    DeviceInfo[] _pluginDevices = Array.Empty<DeviceInfo>();
+
+    /// <summary>Plugin devices are numbered from here, well clear of the server's indices.</summary>
+    const int PluginIndexBase = 1_000_000;
+
+    /// <summary>Whether a device index belongs to a plugin device rather than to the server.</summary>
+    public static bool IsPluginIndex(int index) => index >= PluginIndexBase;
+
+    void SetServerDevices(DeviceInfo[] list)
+    {
+        _serverDevices = list;
+        Devices = [.. _serverDevices, .. _pluginDevices];
+    }
+
+    PluginHost? _plugins;
+    volatile bool _pluginsStale;
+
+    /// <summary>Takes the devices of plugins into the list, now and whenever they change.</summary>
+    public void AttachPlugins(PluginHost host)
+    {
+        _plugins = host;
+        host.Changed += () => _pluginsStale = true;
+        _pluginsStale = true;
+    }
+
+    /// <summary>
+    /// Takes up the devices of plugins if they changed. Called from the paint loop between
+    /// frames and from the interface timer; the lock keeps the two from building the list
+    /// at once.
+    /// </summary>
+    /// <returns>True if the list changed.</returns>
+    public bool SyncPlugins()
+    {
+        if (!_pluginsStale || _plugins == null) return false;
+
+        lock (_pluginGate)
+        {
+            if (!_pluginsStale) return false;
+            _pluginsStale = false;
+
+            var found = _plugins.Devices();
+            var list = new DeviceInfo[found.Length];
+
+            for (int i = 0; i < found.Length; i++)
+            {
+                var (plugin, device) = found[i];
+
+                var zones = new List<ZoneInfo>();
+                int running = 0;
+                try
+                {
+                    for (int z = 0; z < device.Zones.Count; z++)
+                    {
+                        var zone = device.Zones[z];
+                        zones.Add(new ZoneInfo(z, zone.Name, zone.LedCount, running, PluginLayout(zone)));
+                        running += zone.LedCount;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    ProbeLog.Log(Loc.P("плагины", "plugins"), device.Name + ": " + ex.Message);
+                }
+
+                list[i] = new DeviceInfo(PluginIndexBase + i, device.Name, device.Location, plugin.Name,
+                                         running, zones.ToArray(), device);
+            }
+
+            _pluginDevices = list;
+            Devices = [.. _serverDevices, .. _pluginDevices];
+            Generation++;
+            PluginGeneration++;
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// Bumped whenever <see cref="SyncPlugins"/> takes up a change. The paint loop and the
+    /// window both call it and only one of them sees it return true, so the window watches
+    /// this instead.
+    /// </summary>
+    public int PluginGeneration { get; private set; }
+
+    readonly object _pluginGate = new();
+
+    /// <summary>A plugin's layout as rectangles, if it gives one for every LED.</summary>
+    static System.Windows.Rect[]? PluginLayout(CaseLight.Plugins.LightZone zone)
+    {
+        if (zone.Layout is not { } layout || layout.Count != zone.LedCount) return null;
+        return layout.Select(r => new System.Windows.Rect(r.X, r.Y, Math.Max(0, r.Width), Math.Max(0, r.Height))).ToArray();
+    }
+
+    /// <summary>
+    /// Writes a frame to one plugin device. Needs no lock: the socket to OpenRGB is not
+    /// involved, and a plugin copies the frame and returns.
+    /// </summary>
+    static void WritePlugin(DeviceInfo info, byte[] rgb)
+    {
+        try { info.Plugin!.Write(rgb); }
+        catch (Exception ex) { ProbeLog.Log(Loc.P("плагины", "plugins"), info.Name + ": " + ex.Message); }
+    }
 
     /// <summary>Safe to call repeatedly; a failure is not retried for a couple of seconds.</summary>
     public bool Connect(bool force = false)
@@ -149,7 +268,7 @@ public sealed class RgbHub : IDisposable
         catch (Exception ex)
         {
             _client = null;
-            Devices = Array.Empty<DeviceInfo>();
+            SetServerDevices(Array.Empty<DeviceInfo>());
             _ids = null;
             _server.Dispose();
             Report(State.NoConnection, ex.Message);
@@ -232,7 +351,7 @@ public sealed class RgbHub : IDisposable
         _server.Dispose();
         _ids = null;
 
-        Devices = Array.Empty<DeviceInfo>();
+        SetServerDevices(Array.Empty<DeviceInfo>());
         _directMode.Clear();
         Generation++;
     }
@@ -276,7 +395,7 @@ public sealed class RgbHub : IDisposable
         // Per-LED control has to be re-established after every reconnect: a restarted
         // server brings its devices back in whatever mode they defaulted to. Only devices
         // that have not had it yet are touched - see _directMode.
-        foreach (var info in Devices)
+        foreach (var info in _serverDevices)
         {
             string key = info.Index + "|" + info.Name + "|" + info.Location;
             if (!_directMode.Add(key)) continue;
@@ -325,7 +444,7 @@ public sealed class RgbHub : IDisposable
             int running = 0;
             for (int z = 0; z < zones.Length; z++)
             {
-                zones[z] = new ZoneInfo(z, d.Zones[z].Name, d.Zones[z].LedCount, running);
+                zones[z] = new ZoneInfo(z, d.Zones[z].Name, d.Zones[z].LedCount, running, d.Zones[z].Layout);
                 running += d.Zones[z].LedCount;
             }
 
@@ -334,7 +453,7 @@ public sealed class RgbHub : IDisposable
         }
 
         _ids = ids;
-        Devices = list.ToArray();
+        SetServerDevices(list.ToArray());
         return true;
     }
 
@@ -353,7 +472,7 @@ public sealed class RgbHub : IDisposable
             int running = 0;
             for (int z = 0; z < d.Zones.Length; z++)
             {
-                zones.Add(new ZoneInfo(z, d.Zones[z].Name, (int)d.Zones[z].LedCount, running));
+                zones.Add(new ZoneInfo(z, d.Zones[z].Name, (int)d.Zones[z].LedCount, running, LibraryLayout(d.Zones[z])));
                 running += (int)d.Zones[z].LedCount;
             }
 
@@ -361,7 +480,22 @@ public sealed class RgbHub : IDisposable
         }
 
         _ids = null;
-        Devices = list.ToArray();
+        SetServerDevices(list.ToArray());
+    }
+
+    /// <summary>The zone's matrix map as the library read it, turned into a layout.</summary>
+    static System.Windows.Rect[]? LibraryLayout(OpenRGB.NET.Zone zone)
+    {
+        var matrix = zone.MatrixMap?.Matrix;
+        if (matrix == null) return null;
+
+        int height = matrix.GetLength(0), width = matrix.GetLength(1);
+        var map = new uint[height * width];
+        for (int row = 0; row < height; row++)
+        for (int col = 0; col < width; col++)
+            map[row * width + col] = matrix[row, col];
+
+        return ZoneLayout.FromMatrix(height, width, map, (int)zone.LedCount);
     }
 
     /// <summary>Whether the server takes rescan requests; see <see cref="ServerChannel"/>.</summary>
@@ -430,7 +564,7 @@ public sealed class RgbHub : IDisposable
                 _modesStale = true;
                 Refresh();
 
-                if (Devices.Length >= wanted)
+                if (_serverDevices.Length >= wanted)
                 {
                     ProbeLog.Log("OpenRGB", ended
                         ? Loc.P("пересканирование завершено", "the rescan is complete")
@@ -581,6 +715,18 @@ public sealed class RgbHub : IDisposable
     /// </summary>
     public bool EndFrame(IReadOnlyCollection<int>? onlyDevices = null)
     {
+        // Устройства плагинов пишутся и без сервера: у них своя связь с железом.
+        bool wantServer = false;
+        foreach (var info in Devices)
+        {
+            if (onlyDevices != null && !onlyDevices.Contains(info.Index)) continue;
+
+            if (info.Plugin == null) { wantServer = true; continue; }
+            if (Compose(info) is { } rgb) WritePlugin(info, rgb);
+        }
+
+        if (!wantServer) return true;
+
         try
         {
             lock (_io)
@@ -588,26 +734,10 @@ public sealed class RgbHub : IDisposable
                 // re-checked inside the lock: recovery disposes the client from its own thread
                 if (_client == null) return false;
 
-                foreach (var info in Devices)
+                foreach (var info in _serverDevices)
                 {
                     if (onlyDevices != null && !onlyDevices.Contains(info.Index)) continue;
-                    if (!_frame.TryGetValue(info.Index, out var buf)) continue;
-
-                    // the list can be re-read between frames, leaving our buffer a size behind
-                    if (buf.r.Length != info.LedCount) continue;
-
-                    var rgb = new byte[info.LedCount * 3];
-                    for (int i = 0; i < info.LedCount; i++)
-                    {
-                        int hits = buf.hits[i];
-                        if (hits == 0) continue;
-
-                        rgb[i * 3] = (byte)(buf.r[i] / hits);
-                        rgb[i * 3 + 1] = (byte)(buf.g[i] / hits);
-                        rgb[i * 3 + 2] = (byte)(buf.b[i] / hits);
-                    }
-
-                    WriteLocked(info, rgb);
+                    if (Compose(info) is { } rgb) WriteLocked(info, rgb);
                 }
 
                 // a refused id means the list moved without our noticing; read it again
@@ -633,6 +763,31 @@ public sealed class RgbHub : IDisposable
         }
 
         return true;
+    }
+
+    /// <summary>
+    /// The averaged colours of one device from the frame buffers, three bytes per LED; null
+    /// if the device has no buffer of its size yet.
+    /// </summary>
+    byte[]? Compose(DeviceInfo info)
+    {
+        if (!_frame.TryGetValue(info.Index, out var buf)) return null;
+
+        // the list can be re-read between frames, leaving our buffer a size behind
+        if (buf.r.Length != info.LedCount) return null;
+
+        var rgb = new byte[info.LedCount * 3];
+        for (int i = 0; i < info.LedCount; i++)
+        {
+            int hits = buf.hits[i];
+            if (hits == 0) continue;
+
+            rgb[i * 3] = (byte)(buf.r[i] / hits);
+            rgb[i * 3 + 1] = (byte)(buf.g[i] / hits);
+            rgb[i * 3 + 2] = (byte)(buf.b[i] / hits);
+        }
+
+        return rgb;
     }
 
     /// <summary>
@@ -687,13 +842,16 @@ public sealed class RgbHub : IDisposable
     /// </summary>
     public bool Blackout()
     {
+        foreach (var info in _pluginDevices)
+            WritePlugin(info, new byte[info.LedCount * 3]);
+
         try
         {
             lock (_io)
             {
-                if (_client == null) return false;
+                if (_client == null) return _serverDevices.Length == 0 && _pluginDevices.Length > 0;
 
-                foreach (var info in Devices)
+                foreach (var info in _serverDevices)
                     WriteLocked(info, new byte[info.LedCount * 3]);
             }
         }
@@ -725,13 +883,16 @@ public sealed class RgbHub : IDisposable
     /// </summary>
     public bool BlackoutOthers(IReadOnlyCollection<int> driven)
     {
+        // An unused plugin device is left alone rather than blacked out: unlike a controller
+        // after a cold boot, it is not stuck in a factory rainbow, and a keyboard nobody put
+        // on the scene should keep the lighting its owner gave it.
         try
         {
             lock (_io)
             {
                 if (_client == null) return false;
 
-                foreach (var info in Devices)
+                foreach (var info in _serverDevices)
                 {
                     if (driven.Contains(info.Index)) continue;
                     WriteLocked(info, new byte[info.LedCount * 3]);
@@ -759,7 +920,7 @@ public sealed class RgbHub : IDisposable
         _server.Dispose();
 
         // stale names in the interface are worse than an honest empty list
-        Devices = Array.Empty<DeviceInfo>();
+        SetServerDevices(Array.Empty<DeviceInfo>());
         _directMode.Clear();
         Generation++;
     }
