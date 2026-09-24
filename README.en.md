@@ -219,7 +219,9 @@ An example is the plugin for the NuPhy Air75 HE keyboard in [plugins/NuPhy](plug
 It sets the colour of every key through the vendor HID interface and gives the key layout
 for the matrix arrangement. The protocol was worked out from the NuPhyIO application. The
 frames show while key lighting is on in NuPhyIO with a brightness above zero. The plugin
-is not part of the releases and is built from source:
+is not part of the releases. A ready build is in [prebuilt/plugins/NuPhy](prebuilt/plugins/NuPhy):
+the folder is copied as a whole into `%AppData%\CaseLight\plugins\`. Building from source
+straight into the same place:
 
 ```
 dotnet publish plugins/NuPhy -c Release -o "%AppData%\CaseLight\plugins\NuPhy"

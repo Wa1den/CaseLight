@@ -1,0 +1,26 @@
+{
+  "runtimeTarget": {
+    "name": ".NETCoreApp,Version=v9.0",
+    "signature": ""
+  },
+  "compilationOptions": {},
+  "targets": {
+    ".NETCoreApp,Version=v9.0": {
+      "CaseLight.NuPhy/1.0.0": {
+        "dependencies": {
+          "CaseLight.Plugins": "1.0.0"
+        },
+        "runtime": {
+          "CaseLight.NuPhy.dll": {}
+        }
+      }
+    }
+  },
+  "libraries": {
+    "CaseLight.NuPhy/1.0.0": {
+      "type": "project",
+      "serviceable": false,
+      "sha512": ""
+    }
+  }
+}

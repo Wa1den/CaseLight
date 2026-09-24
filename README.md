@@ -213,8 +213,9 @@ dotnet publish src/CaseLight/CaseLight.csproj -c Release -r win-x64 --self-conta
 Пример — плагин для клавиатуры NuPhy Air75 HE в [plugins/NuPhy](plugins/NuPhy). Он выводит
 цвет каждой клавиши через служебный интерфейс HID и отдаёт раскладку клавиш для формы
 «матрица». Протокол восстановлен по приложению NuPhyIO. Кадры видны, пока в NuPhyIO
-включена подсветка клавиш с ненулевой яркостью. В релизы плагин не входит и собирается из
-исходников:
+включена подсветка клавиш с ненулевой яркостью. В релизы плагин не входит. Готовая сборка
+лежит в [prebuilt/plugins/NuPhy](prebuilt/plugins/NuPhy): папка копируется целиком в
+`%AppData%\CaseLight\plugins\`. Сборка из исходников сразу туда же:
 
 ```
 dotnet publish plugins/NuPhy -c Release -o "%AppData%\CaseLight\plugins\NuPhy"
