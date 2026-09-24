@@ -52,6 +52,41 @@ public sealed class PluginHost : IDisposable
         public bool Running => Plugins.Count > 0;
 
         internal List<Type>? Types;
+
+        /// <summary>
+        /// Version of the plugin, empty if it cannot be told.
+        ///
+        /// Shown because two copies of a plugin can be about at once, one next to the settings
+        /// and one next to the program, and which of them runs is not otherwise visible: a
+        /// newer build copied to the wrong place looked exactly like a fix that did not work.
+        /// Taken from the loaded assembly once the plugin runs, and until then from the file
+        /// properties of its DLL, which does not run any of its code.
+        /// </summary>
+        public string Version
+        {
+            get
+            {
+                try
+                {
+                    var assembly = Plugins.FirstOrDefault()?.GetType().Assembly;
+                    string? v = assembly?.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion
+                                ?? assembly?.GetName().Version?.ToString(3);
+
+                    if (v == null)
+                    {
+                        var dll = Directory.GetFiles(Folder, "*.dll")
+                            .Where(f => !string.Equals(Path.GetFileNameWithoutExtension(f), FolderContext.Contract, StringComparison.OrdinalIgnoreCase))
+                            .OrderByDescending(f => Path.GetFileName(f).Contains(Id, StringComparison.OrdinalIgnoreCase))
+                            .FirstOrDefault();
+                        if (dll != null) v = System.Diagnostics.FileVersionInfo.GetVersionInfo(dll).ProductVersion;
+                    }
+
+                    // сборка дописывает к версии хэш коммита после «+»
+                    return v?.Split('+')[0] ?? "";
+                }
+                catch { return ""; }
+            }
+        }
     }
 
     readonly object _gate = new();
