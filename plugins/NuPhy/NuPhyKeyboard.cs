@@ -20,11 +20,23 @@ sealed class NuPhyKeyboard : ILightDevice, IDisposable
     /// <summary>How long to wait for the answer to one packet.</summary>
     const int ReplyTimeoutMs = 100;
 
-    const byte CmdLedSyncDownload = 0xDD;
+    const byte CmdLedSyncDownload = 0xDD, CmdLedSyncUpload = 0xDE;
     const int DataMax = 56;
+
+    /// <summary>How often the frame is read back to see whether the keyboard shows it.</summary>
+    const int CheckMs = 2000;
+
+    /// <summary>
+    /// Read-backs in a row that must come out black while colour was sent before the frame
+    /// counts as not shown. One is not enough: a dark scene sends black on its own, and the
+    /// buffer read can still hold the frame before the one just sent.
+    /// </summary>
+    const int MissesForProblem = 3;
 
     readonly Model _model;
     readonly string _path;
+    readonly Action _problemChanged;
+    volatile string _problem = "";
     readonly Thread _thread;
     readonly AutoResetEvent _wake = new(false);
     readonly object _gate = new();
@@ -34,10 +46,11 @@ sealed class NuPhyKeyboard : ILightDevice, IDisposable
     bool _dirty, _driving;
     volatile bool _stop;
 
-    public NuPhyKeyboard(Model model, string path)
+    public NuPhyKeyboard(Model model, string path, Action problemChanged)
     {
         _model = model;
         _path = path;
+        _problemChanged = problemChanged;
         _frame = new byte[3 * (model.KeyLeds + model.SideLeds)];
         Zones = new[] { new LightZone("Keys", model.KeyLeds, model.Layout()) };
 
@@ -48,6 +61,8 @@ sealed class NuPhyKeyboard : ILightDevice, IDisposable
     public string Name => _model.Name;
     public string Location => _path;
     public IReadOnlyList<LightZone> Zones { get; }
+
+    public string Problem => _problem;
 
     public string Path => _path;
 
@@ -74,7 +89,8 @@ sealed class NuPhyKeyboard : ILightDevice, IDisposable
     {
         HidChannel? channel = null;
         var copy = new byte[_frame.Length];
-        long lastSent = 0;
+        long lastSent = 0, lastCheck = 0;
+        int misses = 0;
 
         while (!_stop)
         {
@@ -101,16 +117,55 @@ sealed class NuPhyKeyboard : ILightDevice, IDisposable
                 if (channel == null) { Thread.Sleep(KeepAliveMs); continue; }
             }
 
-            if (Send(channel, copy)) lastSent = Environment.TickCount64;
-            else
+            if (!Send(channel, copy))
             {
                 channel.Dispose();
                 channel = null;
+                continue;
+            }
+
+            lastSent = Environment.TickCount64;
+            if (lastSent - lastCheck < CheckMs) continue;
+            lastCheck = lastSent;
+
+            switch (Shown(channel, copy))
+            {
+                case true: misses = 0; SetProblem(""); break;
+                case false: if (++misses >= MissesForProblem) SetProblem(LightingOff()); break;
             }
         }
 
         channel?.Dispose();
     }
+
+    /// <summary>
+    /// Whether the keyboard shows the frame, judged by the first packet of it read back: the
+    /// firmware with key lighting switched off in NuPhyIO answers every packet of a frame
+    /// and keeps its colour buffer black, which is how it was found on an Air75 HE with
+    /// firmware 1.10. Null when it cannot be told: black was sent, or the read failed.
+    /// </summary>
+    static bool? Shown(HidChannel channel, byte[] sent)
+    {
+        if (!sent.AsSpan(0, DataMax).ContainsAnyExcept((byte)0)) return null;
+
+        var reply = channel.Transact(Packet(CmdLedSyncUpload, 0, new byte[DataMax]), ReplyTimeoutMs);
+        if (reply == null || reply.Length < 8 + DataMax) return null;
+
+        return reply.AsSpan(8, DataMax).ContainsAnyExcept((byte)0);
+    }
+
+    void SetProblem(string problem)
+    {
+        if (_problem == problem) return;
+        _problem = problem;
+        _problemChanged();
+    }
+
+    // Буфер отдаёт цвета уже умноженными на яркость подсветки (200 читается как 105), так что
+    // нулевая яркость выглядит так же, как выключенная подсветка.
+    static string LightingOff() => PluginApi.Language == "ru"
+        ? "Кадры на клавиатуре не видны: в NuPhyIO подсветка клавиш выключена или её яркость на нуле."
+        : "The frames do not show on the keyboard: key lighting is switched off in NuPhyIO or its brightness is at zero.";
 
     static bool Send(HidChannel channel, byte[] frame)
     {

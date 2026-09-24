@@ -266,6 +266,11 @@ public sealed partial class MainWindow
                 Touch();
             };
             p.Children.Add(Ui.Labeled(Loc.T("fixture.zone"), zoneBox));
+
+            // устройство плагина может сообщить, что кадры на нём не видны, и почему
+            string problem = "";
+            try { problem = info.Plugin?.Problem ?? ""; } catch { /* сломанный плагин показан в своём разделе */ }
+            if (problem != "") p.Children.Add(Ui.Warning(problem));
         }
         else
         {

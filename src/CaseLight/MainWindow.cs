@@ -178,6 +178,7 @@ public sealed partial class MainWindow : Window
         _painter = new CasePainter(_hub, _scene);
 
         // до первой сборки страниц: раздел плагинов показывает найденные папки
+        CaseLight.Plugins.PluginApi.Language = Loc.Language;
         _plugins.Scan();
         _hub.AttachPlugins(_plugins);
         _plugins.Apply(_scene.Plugins);
@@ -876,6 +877,10 @@ public sealed partial class MainWindow : Window
                 : !entry.Running ? Loc.T("plugins.off")
                 : string.Format(Loc.T("plugins.devices"), entry.Plugins.Sum(DeviceCount));
             panel.Children.Add(Ui.Note(state));
+
+            foreach (var running in entry.Plugins)
+            foreach (var (name, problem) in Problems(running))
+                panel.Children.Add(Ui.Warning(name + ": " + problem));
         }
 
         try { System.IO.Directory.CreateDirectory(PluginHost.Root); }
@@ -890,6 +895,13 @@ public sealed partial class MainWindow : Window
             RebuildSections();
         })));
     });
+
+    /// <summary>The devices of a plugin that report a problem, with its text.</summary>
+    static (string Name, string Problem)[] Problems(CaseLight.Plugins.ILightPlugin plugin)
+    {
+        try { return plugin.Devices.Where(d => d.Problem != "").Select(d => (d.Name, d.Problem)).ToArray(); }
+        catch { return []; }
+    }
 
     static int DeviceCount(CaseLight.Plugins.ILightPlugin plugin)
     {
@@ -1980,6 +1992,10 @@ public sealed partial class MainWindow : Window
     void ApplyLanguage()
     {
         Loc.Load(_scene.Language);
+
+        // Предупреждения плагинов складываются в момент смены состояния устройства и на
+        // новом языке появятся со следующей сменой; описания перечитываются при пересборке ниже.
+        CaseLight.Plugins.PluginApi.Language = Loc.Language;
 
         Title = Loc.T("app.title");
         _canvasToggle.Content = Loc.T("nav.canvas");

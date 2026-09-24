@@ -8,6 +8,14 @@ public static class PluginApi
 {
     /// <summary>Raised on any change a plugin built earlier would break on.</summary>
     public const int Version = 1;
+
+    /// <summary>
+    /// Language of the program's interface, "ru", "en" or a code added as a file. Set by the
+    /// program before plugins start and on every change; a plugin reads it when it composes
+    /// text for <see cref="ILightDevice.Problem"/> and falls back to English for a code it
+    /// does not know.
+    /// </summary>
+    public static string Language { get; set; } = "en";
 }
 
 /// <summary>
@@ -62,6 +70,13 @@ public interface ILightDevice
 
     /// <summary>The zones, in the order their LEDs follow each other in a frame.</summary>
     IReadOnlyList<LightZone> Zones { get; }
+
+    /// <summary>
+    /// Why the device does not show what it is sent, in the interface language
+    /// (<see cref="PluginApi.Language"/>); empty when it does. The plugin raises
+    /// <see cref="ILightPlugin.DevicesChanged"/> when this changes, so the program shows it.
+    /// </summary>
+    string Problem { get; }
 
     /// <summary>
     /// Shows a frame: three bytes R, G, B per LED of all zones in order.

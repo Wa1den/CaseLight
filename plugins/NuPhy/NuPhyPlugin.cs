@@ -25,7 +25,9 @@ public sealed class NuPhyPlugin : ILightPlugin
 
     public int ApiVersion => PluginApi.Version;
     public string Name => "NuPhy";
-    public string Description => "Keyboards NuPhy Air75 HE: per-key colour through the vendor HID interface.";
+    public string Description => PluginApi.Language == "ru"
+        ? "Клавиатуры NuPhy Air75 HE: цвет каждой клавиши через служебный интерфейс HID."
+        : "NuPhy Air75 HE keyboards: the colour of every key through the vendor HID interface.";
 
     public IReadOnlyList<ILightDevice> Devices
     {
@@ -68,7 +70,7 @@ public sealed class NuPhyPlugin : ILightPlugin
             foreach (var (path, model) in present)
             {
                 if (_keyboards.ContainsKey(path)) continue;
-                _keyboards[path] = new NuPhyKeyboard(model, path);
+                _keyboards[path] = new NuPhyKeyboard(model, path, () => DevicesChanged?.Invoke(this, EventArgs.Empty));
                 changed = true;
             }
         }
