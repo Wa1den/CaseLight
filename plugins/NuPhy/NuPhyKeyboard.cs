@@ -33,6 +33,22 @@ sealed class NuPhyKeyboard : ILightDevice, IDisposable
     /// </summary>
     const int MissesForProblem = 3;
 
+    /// <summary>
+    /// How long frames stop after Caps Lock goes off.
+    ///
+    /// The left strip is the Caps Lock indicator. The firmware lights it at once when Caps
+    /// Lock goes on, but clears it only with the next step of its own effect, and the effect
+    /// stands still for as long as frames keep coming: the strip stayed lit after Caps Lock
+    /// was off. Nothing tried ends that state sooner than its timeout - QuickCommEnd, an
+    /// empty frame, QuickCommStart and End - the strip moved again after 1.52 to 1.57 s in
+    /// every case. The keys hold the last frame for most of the pause and show their own
+    /// effect only for the remainder.
+    /// </summary>
+    const int IndicatorPauseMs = 1700;
+
+    /// <summary>How often the thread looks at Caps Lock while no frame wakes it.</summary>
+    const int PollMs = 100;
+
     readonly Model _model;
     readonly string _path;
     readonly Action _problemChanged;
@@ -89,13 +105,21 @@ sealed class NuPhyKeyboard : ILightDevice, IDisposable
     {
         HidChannel? channel = null;
         var copy = new byte[_frame.Length];
-        long lastSent = 0, lastCheck = 0;
+        long lastSent = 0, lastCheck = 0, pauseUntil = 0;
         int misses = 0;
+        bool capsWasOn = CapsLockOn();
 
         while (!_stop)
         {
-            _wake.WaitOne(KeepAliveMs);
+            _wake.WaitOne(PollMs);
             if (_stop) break;
+
+            bool caps = CapsLockOn();
+            if (capsWasOn && !caps) pauseUntil = Environment.TickCount64 + IndicatorPauseMs;
+            capsWasOn = caps;
+
+            // кадр остаётся несданным и уйдёт первым после паузы
+            if (Environment.TickCount64 < pauseUntil) continue;
 
             lock (_gate)
             {
@@ -153,6 +177,13 @@ sealed class NuPhyKeyboard : ILightDevice, IDisposable
 
         return reply.AsSpan(8, DataMax).ContainsAnyExcept((byte)0);
     }
+
+    static bool CapsLockOn() => (GetKeyState(VkCapital) & 1) != 0;
+
+    const int VkCapital = 0x14;
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    static extern short GetKeyState(int virtualKey);
 
     void SetProblem(string problem)
     {
