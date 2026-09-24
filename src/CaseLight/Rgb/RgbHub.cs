@@ -231,6 +231,26 @@ public sealed class RgbHub : IDisposable
     }
 
     /// <summary>
+    /// Lets devices of plugins go back to their own effects, all of them or all but those
+    /// in <paramref name="except"/>.
+    ///
+    /// Called with the devices fixtures drive whenever those are worked out again: a device
+    /// whose last fixture was switched off would otherwise hold its last frame for good,
+    /// since nothing writes to it any more. Unlike a controller after a cold boot, it is not
+    /// stuck in a factory rainbow, so it is not blacked out either.
+    /// </summary>
+    public void ReleasePlugins(IReadOnlyCollection<int>? except)
+    {
+        foreach (var info in _pluginDevices)
+        {
+            if (except != null && except.Contains(info.Index)) continue;
+
+            try { info.Plugin!.Release(); }
+            catch (Exception ex) { ProbeLog.Log(Loc.P("плагины", "plugins"), info.Name + ": " + ex.Message); }
+        }
+    }
+
+    /// <summary>
     /// Writes a frame to one plugin device. Needs no lock: the socket to OpenRGB is not
     /// involved, and a plugin copies the frame and returns.
     /// </summary>
@@ -839,11 +859,15 @@ public sealed class RgbHub : IDisposable
     /// thread while the paint thread is filling those very buffers: the clearing pass wiped
     /// half a frame out from under it, and the dictionary itself was being rewritten while
     /// the other thread read it. Composing the black frame here touches nothing shared.
+    ///
+    /// Devices of plugins are released instead and go back to their own effects. A held
+    /// frame costs more than dark keys there: the NuPhy firmware stops animating the side
+    /// strips for as long as frames keep coming, and they stayed frozen until the program
+    /// exited.
     /// </summary>
     public bool Blackout()
     {
-        foreach (var info in _pluginDevices)
-            WritePlugin(info, new byte[info.LedCount * 3]);
+        ReleasePlugins(except: null);
 
         try
         {
@@ -883,9 +907,7 @@ public sealed class RgbHub : IDisposable
     /// </summary>
     public bool BlackoutOthers(IReadOnlyCollection<int> driven)
     {
-        // An unused plugin device is left alone rather than blacked out: unlike a controller
-        // after a cold boot, it is not stuck in a factory rainbow, and a keyboard nobody put
-        // on the scene should keep the lighting its owner gave it.
+        // Устройства плагинов здесь не трогаются: их отпускает ReleasePlugins, и без сервера тоже.
         try
         {
             lock (_io)

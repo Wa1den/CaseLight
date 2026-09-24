@@ -14,8 +14,8 @@ namespace CaseLight.NuPhy;
 /// Input reports are read on a thread of their own and queued. The keyboard answers every
 /// command, and a queue nobody empties would hand the next command the answer to an old
 /// one; so every exchange empties it first and then waits for the answer with its own
-/// command code. NuPhyIO, if it is running, gets the same answers and sends its own
-/// commands, which is why the code is checked rather than taking the first report.
+/// command code and offset. NuPhyIO, if it is running, gets the same answers and sends its
+/// own commands, which is why both are checked rather than taking the first report.
 /// </summary>
 sealed class HidChannel : IDisposable
 {
@@ -92,7 +92,10 @@ sealed class HidChannel : IDisposable
             int left = (int)(deadline - Environment.TickCount64);
             if (left <= 0 || _closed) return null;
 
-            if (_replies.TryTake(out var reply, left) && reply.Length > 1 && reply[1] == packet[1])
+            // Смещение сверяется вместе с командой: другая программа, читающая кадр той же
+            // командой, получает и наши ответы, а мы её, и два потока путали куски кадра.
+            if (_replies.TryTake(out var reply, left) && reply.Length > 6
+                && reply[1] == packet[1] && reply[5] == packet[5] && reply[6] == packet[6])
                 return reply;
         }
     }

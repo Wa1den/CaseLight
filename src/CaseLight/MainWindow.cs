@@ -859,6 +859,8 @@ public sealed partial class MainWindow : Window
         {
             var plugin = entry.Plugins.FirstOrDefault();
             string title = plugin == null ? entry.Id : plugin.Name;
+            string version = entry.Version;
+            if (version != "") title += " " + version;
             bool on = _scene.Plugins.Contains(entry.Id, StringComparer.OrdinalIgnoreCase);
 
             panel.Children.Add(Ui.Check(title, on, v =>
@@ -877,6 +879,11 @@ public sealed partial class MainWindow : Window
                 : !entry.Running ? Loc.T("plugins.off")
                 : string.Format(Loc.T("plugins.devices"), entry.Plugins.Sum(DeviceCount));
             panel.Children.Add(Ui.Note(state));
+
+            // из какой из двух папок взят плагин: копия в другой видна только так
+            var from = Ui.PathLink(entry.Folder);
+            from.Margin = new Thickness(0, -6, 0, 8);
+            panel.Children.Add(from);
 
             foreach (var running in entry.Plugins)
             foreach (var (name, problem) in Problems(running))

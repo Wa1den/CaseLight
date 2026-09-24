@@ -6,7 +6,7 @@
 
 | Папка | Исходники | Версия |
 | --- | --- | --- |
-| [plugins/NuPhy](plugins/NuPhy) | [plugins/NuPhy](../plugins/NuPhy) | 1.0.0, контракт 1 |
+| [plugins/NuPhy](plugins/NuPhy) | [plugins/NuPhy](../plugins/NuPhy) | 1.0.1, контракт 1 |
 
 Сборка пересобирается после любой правки исходников плагина или контракта той же командой:
 
