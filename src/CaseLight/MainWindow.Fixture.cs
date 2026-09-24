@@ -323,13 +323,19 @@ public sealed partial class MainWindow
         };
         kindBox.SelectionChanged += (_, _) =>
         {
-            f.Arrangement = kindBox.SelectedIndex switch
+            var chosen = kindBox.SelectedIndex switch
             {
                 0 => Arrangement.Strip,
                 1 => Arrangement.Closed,
                 3 => Arrangement.Matrix,
                 _ => Arrangement.Point
             };
+
+            // список поднимает событие и при входе в дерево, а подгонка высоты нужна только
+            // при настоящей смене формы
+            if (chosen == f.Arrangement) return;
+
+            f.Arrangement = chosen;
             TakeLayout(f, fitHeight: true);
             BuildFixturePanel();
             Touch();

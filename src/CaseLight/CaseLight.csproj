@@ -34,6 +34,9 @@
          repository on purpose: the case lighting has to work on a machine that has no
          monitor strip and no external controller, so it cannot depend on Rimlight. -->
     <ProjectReference Include="..\CaseLight.Core\CaseLight.Core.csproj" />
+
+    <!-- The contract plugins are built against; see PluginHost. -->
+    <ProjectReference Include="..\CaseLight.Plugins\CaseLight.Plugins.csproj" />
   </ItemGroup>
 
 </Project>

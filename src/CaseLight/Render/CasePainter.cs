@@ -518,6 +518,7 @@ public sealed class CasePainter : IDisposable
 
             // Между кадрами, а не внутри: перечитывание меняет длины буферов.
             _hub.RefreshIfStale();
+            _hub.SyncPlugins();
 
             // A reconnect renumbers the controllers, so resolved indices have to be redone
             // before they address the wrong hardware.
@@ -534,14 +535,16 @@ public sealed class CasePainter : IDisposable
                 continue;
             }
 
-            if (!_hub.Connect())
+            // Устройствам плагинов сервер не нужен: пока его нет, раскраска идёт на них одних.
+            bool serverUp = _hub.Connect();
+            if (!serverUp && !_hasPluginTargets)
             {
                 Status = _hub.Status;
                 Thread.Sleep(500);
                 continue;
             }
 
-            if (_blankUnused)
+            if (_blankUnused && serverUp)
             {
                 _blankUnused = false;
                 _hub.BlackoutOthers(_deviceDivider.Keys);
@@ -585,8 +588,11 @@ public sealed class CasePainter : IDisposable
 
             _dueNow.Clear();
             foreach (var (device, divider) in _deviceDivider)
+            {
+                if (!serverUp && !RgbHub.IsPluginIndex(device)) continue;
                 if (divider <= 1 || _frameNo % divider == 0)
                     _dueNow.Add(device);
+            }
 
             bool linkLost = false, nothingToWrite;
 
@@ -622,6 +628,9 @@ public sealed class CasePainter : IDisposable
                 framesThisSecond = 0;
                 fpsWindow = tick;
                 Status = (test != null ? Loc.P("тест размещения, ", "placement test, ") : Loc.P("идёт раскраска, ", "painting, ")) + Rate(Fps);
+
+                // раскраска идёт на плагинах, а часть фигур ждёт сервер
+                if (!serverUp && _hasServerTargets) Status += "; " + _hub.Status;
             }
 
             pacer.Wait(periodMs);
@@ -1200,9 +1209,15 @@ public sealed class CasePainter : IDisposable
         _groups = groups.ToArray();
         foreach (var g in _groups) g.Pipe.Reset(g.Count);
 
+        _hasPluginTargets = _deviceDivider.Keys.Any(RgbHub.IsPluginIndex);
+        _hasServerTargets = _deviceDivider.Keys.Any(d => !RgbHub.IsPluginIndex(d));
+
         _resolvedGeneration = _hub.Generation;
         _blankUnused = true;
     }
+
+    /// <summary>Whether any fixture is on a plugin device, or on a controller of OpenRGB. Set by <see cref="Rebuild"/>.</summary>
+    bool _hasPluginTargets, _hasServerTargets;
 
     public void Dispose()
     {

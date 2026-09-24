@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Плагин CaseLight для клавиатур NuPhy на прошивке NuPhy IO. Кладётся папкой в
+       plugins рядом с программой:
+       dotnet publish plugins/NuPhy -c Release -o dist/plugins/NuPhy -->
+  <PropertyGroup>
+    <TargetFramework>net9.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <Platforms>x64</Platforms>
+    <PlatformTarget>x64</PlatformTarget>
+    <RootNamespace>CaseLight.NuPhy</RootNamespace>
+    <AssemblyName>CaseLight.NuPhy</AssemblyName>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <Version>1.0.0</Version>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Контракт берётся у программы во время работы: копия рядом с плагином дала бы
+         второй экземпляр интерфейса, который программа не узнает. -->
+    <ProjectReference Include="..\..\src\CaseLight.Plugins\CaseLight.Plugins.csproj" Private="false" />
+  </ItemGroup>
+
+</Project>
