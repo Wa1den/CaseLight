@@ -1,0 +1,32 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Плагин-эффект CaseLight: уровень громкости и спектр звука на клавиатуре. Кладётся
+       папкой в plugins рядом с программой или с настройками:
+       dotnet publish plugins/Audio -c Release -o dist/plugins/Audio -->
+  <PropertyGroup>
+    <TargetFramework>net9.0-windows10.0.22621.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <Platforms>x64</Platforms>
+    <PlatformTarget>x64</PlatformTarget>
+    <RootNamespace>CaseLight.Audio</RootNamespace>
+    <AssemblyName>CaseLight.Audio</AssemblyName>
+    <Version>1.0.0</Version>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Громкость устройства вывода и захват того, что оно играет (WASAPI loopback). -->
+    <PackageReference Include="NAudio.Wasapi" Version="2.2.1" />
+
+    <!-- Контракт берётся у программы во время работы: копия рядом с плагином дала бы
+         второй экземпляр интерфейса, который программа не узнает. -->
+    <ProjectReference Include="..\..\src\CaseLight.Plugins\CaseLight.Plugins.csproj" Private="false" />
+  </ItemGroup>
+
+  <!-- Проекция WinRT (сеансы мультимедиа Windows) тоже берётся у программы: она собрана под
+       тот же SDK, а вторая копия WinRT.Runtime в одном процессе с первой не уживается. -->
+  <Target Name="UseHostWinRT" AfterTargets="Build;Publish">
+    <Delete Files="$(OutDir)WinRT.Runtime.dll;$(OutDir)Microsoft.Windows.SDK.NET.dll;$(PublishDir)WinRT.Runtime.dll;$(PublishDir)Microsoft.Windows.SDK.NET.dll" />
+  </Target>
+
+</Project>

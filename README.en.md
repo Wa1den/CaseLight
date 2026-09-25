@@ -227,6 +227,38 @@ straight into the same place:
 dotnet publish plugins/NuPhy -c Release -o "%AppData%\CaseLight\plugins\NuPhy"
 ```
 
+### Effects
+
+An effect is a plugin that draws over the frame of a plugin device: an indicator, a bar, a
+spectrum. It is switched on in the same «Plugins» section and adds a section of its own to
+the window, where the device is chosen and the settings of the effect are set; they are
+kept in `config.json` with the rest. An effect shows while the painting runs and lies over
+the picture from the screen. With no fixtures on the device it has black under it, and when
+there is nothing to show the device goes back to its own lighting. Effects draw only on
+devices of plugins, so without a device plugin switched on the «Plugins» section shows a
+warning.
+
+An effect implements `ILightEffect` from the same contract
+([EffectApi.cs](src/CaseLight.Plugins/EffectApi.cs)). It describes its settings as a list
+of `EffectSetting` (checkbox, slider, list, colour, rows of the device, LED number), and the
+program builds the page from that. `Paint` is called about 60 times a second and draws on
+an `EffectCanvas`; the rows of LEDs come from the layout of the device (`LedGrid`). The
+`Requires` property names the device plugins the effect is made for; empty means any.
+
+Ready effects are in [prebuilt/plugins](prebuilt/plugins), the sources in
+[plugins](plugins):
+
+* **Volume and equalizer** ([plugins/Audio](plugins/Audio)). The volume of the default
+  output device is shown as a bar along the rows chosen after every change, in another
+  colour when muted. The spectrum of what that device plays is shown as columns across the
+  keyboard; the height of a column is the number of rows chosen. The sound is captured
+  through WASAPI loopback, and only while the spectrum is shown. The spectrum can be limited
+  to the time a player or a browser plays something: the same sessions Windows shows in the
+  media panel next to the volume.
+* **Caps Lock** ([plugins/CapsLock](plugins/CapsLock)). Lights the LED chosen by number
+  while Caps Lock is on. Editing the number lights the LED for 2 s, which makes it easier
+  to find.
+
 ## Licence
 
 [MIT](LICENSE).

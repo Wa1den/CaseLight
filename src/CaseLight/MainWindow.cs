@@ -30,6 +30,7 @@ public sealed partial class MainWindow : Window
 {
     readonly RgbHub _hub = new();
     readonly PluginHost _plugins = new();
+    EffectMixer _effects = null!;
 
     /// <summary><see cref="RgbHub.PluginGeneration"/> the window last showed.</summary>
     int _pluginGenerationShown = -1;
@@ -181,6 +182,10 @@ public sealed partial class MainWindow : Window
         CaseLight.Plugins.PluginApi.Language = Loc.Language;
         _plugins.Scan();
         _hub.AttachPlugins(_plugins);
+
+        // Эффекты рисуют, только пока идёт раскраска: пауза и стоп гасят их вместе с картинкой.
+        _effects = new EffectMixer(_plugins, () => _scene, () => _painter.IsRunning && !_painter.IsPaused);
+        _hub.AttachEffects(_effects);
         _plugins.Apply(_scene.Plugins);
 
         RestoreWindowGeometry();
@@ -291,6 +296,7 @@ public sealed partial class MainWindow : Window
             _hub.Dispose();
 
             // устройства плагинов возвращаются к своим эффектам: держать кадр после выхода некому
+            _effects.Dispose();
             _plugins.Dispose();
         };
     }
@@ -657,6 +663,7 @@ public sealed partial class MainWindow : Window
         BuildGeneralSection();
         BuildOpenRgbSection();
         BuildPluginsSection();
+        BuildEffectSections();
         BuildDevicesSection();
         BuildCaptureSection();
         BuildCropSection();
@@ -679,6 +686,10 @@ public sealed partial class MainWindow : Window
 
         // the settings may have arrived from a cancel, an import or a reset, not from a checkbox
         ApplyScreenPreview();
+
+        // Подписи в рейле могли смениться с языком или с разделом включённого эффекта, а от
+        // ширины рейла считается узкое окно.
+        if (!_scene.ShowCanvas) _canvasShown = null;
         ApplyCanvasVisibility();
 
         // подписи над холстом могли смениться вместе с языком, а с ними и его ширина
@@ -857,8 +868,7 @@ public sealed partial class MainWindow : Window
 
         foreach (var entry in entries)
         {
-            var plugin = entry.Plugins.FirstOrDefault();
-            string title = plugin == null ? entry.Id : plugin.Name;
+            string title = entry.Name ?? entry.Id;
             string version = entry.Version;
             if (version != "") title += " " + version;
             bool on = _scene.Plugins.Contains(entry.Id, StringComparer.OrdinalIgnoreCase);
@@ -873,12 +883,16 @@ public sealed partial class MainWindow : Window
 
                 _plugins.Apply(_scene.Plugins);
                 Touch();
-            }, plugin?.Description));
+            }, entry.Description));
 
             string state = entry.Error != "" ? entry.Error
                 : !entry.Running ? Loc.T("plugins.off")
+                : entry.Plugins.Count == 0 ? string.Format(Loc.T("plugins.effect"), entry.Name)
                 : string.Format(Loc.T("plugins.devices"), entry.Plugins.Sum(DeviceCount));
             panel.Children.Add(Ui.Note(state));
+
+            string missing = entry.Running ? _plugins.Missing(entry) : "";
+            if (missing != "") panel.Children.Add(Ui.Warning(missing));
 
             // из какой из двух папок взят плагин: копия в другой видна только так
             var from = Ui.PathLink(entry.Folder);
@@ -2021,13 +2035,6 @@ public sealed partial class MainWindow : Window
         BuildFixturePanel();
 
         if (_updateCard.Visibility == Visibility.Visible) ShowUpdateCard();
-
-        // Ширина рейла меняется вместе с длиной подписей, а от неё считается узкое окно.
-        if (!_scene.ShowCanvas)
-        {
-            _canvasShown = null;
-            ApplyCanvasVisibility();
-        }
     }
 
     /// <summary>Starts or stops showing the screen on the canvas, per the setting.</summary>

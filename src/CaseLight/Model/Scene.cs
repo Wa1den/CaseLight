@@ -449,6 +449,15 @@ public sealed class Scene
     /// </summary>
     public string[] Plugins { get; set; } = [];
 
+    /// <summary>
+    /// Settings of the effects, by the full class name of the effect, then by the key of
+    /// the setting. A key that is missing takes the default the effect declares.
+    ///
+    /// Replaced whole on every change, like <see cref="Plugins"/>; the paint of effects
+    /// tells a change by the reference.
+    /// </summary>
+    public Dictionary<string, Dictionary<string, string>> Effects { get; set; } = new();
+
     // ---- питание ----------------------------------------------------------
 
     public bool OffOnExit { get; set; } = true;

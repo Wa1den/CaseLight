@@ -7,6 +7,8 @@
 | Папка | Исходники | Версия |
 | --- | --- | --- |
 | [plugins/NuPhy](plugins/NuPhy) | [plugins/NuPhy](../plugins/NuPhy) | 1.0.1, контракт 1 |
+| [plugins/Audio](plugins/Audio) | [plugins/Audio](../plugins/Audio) | 1.0.0, контракт 1, нужен CaseLight 1.12.0 |
+| [plugins/CapsLock](plugins/CapsLock) | [plugins/CapsLock](../plugins/CapsLock) | 1.0.0, контракт 1, нужен CaseLight 1.12.0 |
 
 Сборка пересобирается после любой правки исходников плагина или контракта той же командой:
 
@@ -14,4 +16,5 @@
 dotnet publish plugins/NuPhy -c Release -o prebuilt/plugins/NuPhy
 ```
 
-Из результата в репозиторий идут `.dll` и `.deps.json`; `.pdb` остаётся вне его.
+Из результата в репозиторий идут `.dll` и `.deps.json`; `.pdb` остаётся вне его. У
+плагина Audio в папке лежат и библиотеки NAudio: без них он не запустится.
