@@ -20,7 +20,7 @@ public static class Loc
     /// silently shadowed newly reworded labels, so a mismatched version rewrites it. Only
     /// the two built-in files are rewritten; added languages are left alone.
     /// </summary>
-    const string Version = "19";
+    const string Version = "20";
 
     /// <summary>
     /// Bookkeeping entries rather than translated text: the version a file was written
@@ -262,6 +262,15 @@ public static class Loc
         ["plugins.folder"] = "Папки плагинов",
         ["plugins.folder.note"] = "Плагин копируется папкой целиком в папку рядом с настройками или в plugins рядом с программой. Если папка с тем же именем есть в обеих, берётся та, что рядом с настройками. Новая папка появится в списке после «Искать снова».",
         ["plugins.rescan"] = "Искать снова",
+        ["plugins.effect"] = "Работает, настройки в разделе «{0}».",
+        ["effects.device"] = "Устройство",
+        ["effects.device.note"] = "Устройство плагина, на котором рисуется эффект. Эффект виден, пока идёт раскраска, и ложится поверх картинки с экрана; если фигур на устройстве нет, под ним чёрный фон, а когда эффекту нечего показать, устройство возвращается к своей подсветке.",
+        ["effects.nodevice"] = "Не выбрано",
+        ["effects.absent"] = "{0} (не подключено)",
+        ["effects.pick"] = "Выбрать цвет",
+        ["effects.norows"] = "Ряды появятся после выбора устройства.",
+        ["effects.row"] = "{0} ({1})",
+        ["effects.ledrange"] = "Номер от 1 до {0}.",
         ["tab.devices"] = "Устройства",
         ["tab.capture"] = "Захват",
         ["tab.crop"] = "Кадрирование",
@@ -525,6 +534,15 @@ public static class Loc
         ["plugins.folder"] = "Plugins folders",
         ["plugins.folder.note"] = "A plugin is copied as a whole folder into the folder next to the settings or into plugins next to the program. If a folder of the same name is in both, the one next to the settings is taken. A new folder appears in the list after «Search again».",
         ["plugins.rescan"] = "Search again",
+        ["plugins.effect"] = "Running, settings in the «{0}» section.",
+        ["effects.device"] = "Device",
+        ["effects.device.note"] = "The plugin device the effect is drawn on. The effect shows while the painting runs and lies over the picture from the screen; with no fixtures on the device it has black under it, and when the effect has nothing to show the device goes back to its own lighting.",
+        ["effects.nodevice"] = "None",
+        ["effects.absent"] = "{0} (not connected)",
+        ["effects.pick"] = "Pick colour",
+        ["effects.norows"] = "The rows appear once a device is chosen.",
+        ["effects.row"] = "{0} ({1})",
+        ["effects.ledrange"] = "A number from 1 to {0}.",
         ["tab.devices"] = "Devices",
         ["tab.capture"] = "Capture",
         ["tab.crop"] = "Cropping",

@@ -154,6 +154,10 @@ public sealed class RgbHub : IDisposable
 
     PluginHost? _plugins;
     volatile bool _pluginsStale;
+    EffectMixer? _mixer;
+
+    /// <summary>Sends every frame of a plugin device, and every release, through the effects.</summary>
+    public void AttachEffects(EffectMixer mixer) => _mixer = mixer;
 
     /// <summary>Takes the devices of plugins into the list, now and whenever they change.</summary>
     public void AttachPlugins(PluginHost host)
@@ -245,18 +249,26 @@ public sealed class RgbHub : IDisposable
         {
             if (except != null && except.Contains(info.Index)) continue;
 
-            try { info.Plugin!.Release(); }
+            try
+            {
+                if (_mixer != null) _mixer.Release(info);
+                else info.Plugin!.Release();
+            }
             catch (Exception ex) { ProbeLog.Log(Loc.P("плагины", "plugins"), info.Name + ": " + ex.Message); }
         }
     }
 
     /// <summary>
-    /// Writes a frame to one plugin device. Needs no lock: the socket to OpenRGB is not
-    /// involved, and a plugin copies the frame and returns.
+    /// Writes a frame to one plugin device, through the effects if there are any. Needs no
+    /// lock: the socket to OpenRGB is not involved, and a plugin copies the frame and returns.
     /// </summary>
-    static void WritePlugin(DeviceInfo info, byte[] rgb)
+    void WritePlugin(DeviceInfo info, byte[] rgb)
     {
-        try { info.Plugin!.Write(rgb); }
+        try
+        {
+            if (_mixer != null) _mixer.Write(info, rgb);
+            else info.Plugin!.Write(rgb);
+        }
         catch (Exception ex) { ProbeLog.Log(Loc.P("плагины", "plugins"), info.Name + ": " + ex.Message); }
     }
 

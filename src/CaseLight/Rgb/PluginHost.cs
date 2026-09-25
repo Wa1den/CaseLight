@@ -11,7 +11,8 @@ using CaseLight.Plugins;
 namespace CaseLight.Rgb;
 
 /// <summary>
-/// Finds, loads and runs the plugins that bring devices OpenRGB does not drive.
+/// Finds, loads and runs the plugins that bring devices OpenRGB does not drive, and the
+/// effects that draw over devices (<see cref="ILightEffect"/>).
 ///
 /// A plugin is a folder with its DLLs under one of <see cref="Roots"/>. Nothing in it is
 /// loaded until the plugin is switched on: loading a DLL runs its code, and a folder that
@@ -46,10 +47,19 @@ public sealed class PluginHost : IDisposable
         /// <summary>The plugins the folder holds, once it has been loaded.</summary>
         public List<ILightPlugin> Plugins { get; } = new();
 
+        /// <summary>The effects the folder holds, once it has been loaded.</summary>
+        public List<ILightEffect> Effects { get; } = new();
+
         /// <summary>Why it did not load or start; empty if it did.</summary>
         public string Error { get; set; } = "";
 
-        public bool Running => Plugins.Count > 0;
+        public bool Running => Plugins.Count > 0 || Effects.Count > 0;
+
+        /// <summary>The name of the first plugin or effect started from the folder; null until then.</summary>
+        public string? Name => Plugins.Count > 0 ? Plugins[0].Name : Effects.Count > 0 ? Effects[0].Name : null;
+
+        /// <summary>Its description, as <see cref="Name"/>.</summary>
+        public string? Description => Plugins.Count > 0 ? Plugins[0].Description : Effects.Count > 0 ? Effects[0].Description : null;
 
         internal List<Type>? Types;
 
@@ -68,7 +78,8 @@ public sealed class PluginHost : IDisposable
             {
                 try
                 {
-                    var assembly = Plugins.FirstOrDefault()?.GetType().Assembly;
+                    var assembly = Plugins.FirstOrDefault()?.GetType().Assembly
+                                   ?? Effects.FirstOrDefault()?.GetType().Assembly;
                     string? v = assembly?.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion
                                 ?? assembly?.GetName().Version?.ToString(3);
 
@@ -178,29 +189,47 @@ public sealed class PluginHost : IDisposable
 
         foreach (var type in e.Types)
         {
-            ILightPlugin? plugin = null;
+            object? created = null;
             try
             {
-                plugin = (ILightPlugin)Activator.CreateInstance(type)!;
-                if (plugin.ApiVersion != PluginApi.Version)
+                created = Activator.CreateInstance(type)!;
+
+                int version = created switch
+                {
+                    ILightPlugin p => p.ApiVersion,
+                    ILightEffect f => f.ApiVersion,
+                    _ => PluginApi.Version
+                };
+
+                if (version != PluginApi.Version)
                 {
                     e.Error = string.Format(Loc.P("плагин собран под версию контракта {0}, программе нужна {1}",
                                                   "the plugin is built for contract version {0}, the program needs {1}"),
-                                            plugin.ApiVersion, PluginApi.Version);
-                    plugin.Dispose();
+                                            version, PluginApi.Version);
+                    (created as IDisposable)?.Dispose();
                     continue;
                 }
 
-                plugin.DevicesChanged += OnDevicesChanged;
-                plugin.Start();
-                e.Plugins.Add(plugin);
-                ProbeLog.Log(Loc.P("плагины", "plugins"), Loc.P("запущен: ", "started: ") + plugin.Name);
+                if (created is ILightPlugin plugin)
+                {
+                    plugin.DevicesChanged += OnDevicesChanged;
+                    plugin.Start();
+                    e.Plugins.Add(plugin);
+                    ProbeLog.Log(Loc.P("плагины", "plugins"), Loc.P("запущен: ", "started: ") + plugin.Name);
+                }
+                else if (created is ILightEffect effect)
+                {
+                    effect.Start();
+                    e.Effects.Add(effect);
+                    ProbeLog.Log(Loc.P("плагины", "plugins"), Loc.P("запущен эффект: ", "effect started: ") + effect.Name);
+                }
             }
             catch (Exception ex)
             {
                 e.Error = ex.Message;
                 ProbeLog.Log(Loc.P("плагины", "plugins"), e.Id + ": " + ex);
-                if (plugin != null) Dispose(plugin);
+                if (created is ILightPlugin plugin) Dispose(plugin);
+                else if (created is ILightEffect effect) Dispose(effect);
             }
         }
     }
@@ -209,6 +238,15 @@ public sealed class PluginHost : IDisposable
     {
         foreach (var plugin in e.Plugins) Dispose(plugin);
         e.Plugins.Clear();
+
+        foreach (var effect in e.Effects) Dispose(effect);
+        e.Effects.Clear();
+    }
+
+    static void Dispose(ILightEffect effect)
+    {
+        try { effect.Dispose(); }
+        catch (Exception ex) { ProbeLog.Log(Loc.P("плагины", "plugins"), effect.GetType().Name + ": " + ex.Message); }
     }
 
     void Dispose(ILightPlugin plugin)
@@ -223,6 +261,55 @@ public sealed class PluginHost : IDisposable
     }
 
     void OnDevicesChanged(object? sender, EventArgs e) => Changed?.Invoke();
+
+    /// <summary>
+    /// Every running effect, with the key its settings are kept under: the full name of its
+    /// class, which stays the same whatever the language of its name or the folder it lies in.
+    /// </summary>
+    public (string Key, ILightEffect Effect)[] Effects()
+    {
+        lock (_gate)
+            return _entries.SelectMany(e => e.Effects.Select(f => (f.GetType().FullName ?? f.Name, f))).ToArray();
+    }
+
+    /// <summary>
+    /// What an effect of the folder lacks to have anything to draw on: the device plugin it
+    /// needs is off or missing. Empty when nothing is missing or the folder holds no effect.
+    /// </summary>
+    public string Missing(Entry entry)
+    {
+        lock (_gate)
+        {
+            var running = _entries.SelectMany(e => e.Plugins).Select(p => SafeName(p)).ToArray();
+
+            foreach (var effect in entry.Effects)
+            {
+                IReadOnlyList<string> wanted;
+                try { wanted = effect.Requires; }
+                catch { wanted = []; }
+
+                if (wanted.Count == 0)
+                {
+                    if (running.Length == 0)
+                        return Loc.P("нужен включённый плагин устройств: эффект рисует только на их устройствах",
+                                     "a device plugin has to be on: the effect draws only on their devices");
+                    continue;
+                }
+
+                if (!wanted.Any(w => running.Contains(w, StringComparer.OrdinalIgnoreCase)))
+                    return string.Format(Loc.P("нужен включённый плагин: {0}", "a plugin has to be on: {0}"),
+                                         string.Join(Loc.P(" или ", " or "), wanted));
+            }
+        }
+
+        return "";
+    }
+
+    static string SafeName(ILightPlugin plugin)
+    {
+        try { return plugin.Name; }
+        catch { return ""; }
+    }
 
     /// <summary>Every device of every running plugin, with the plugin it came from.</summary>
     public (ILightPlugin Plugin, ILightDevice Device)[] Devices()
@@ -268,7 +355,7 @@ public sealed class PluginHost : IDisposable
             catch (ReflectionTypeLoadException ex) { exported = ex.Types.Where(t => t != null).ToArray()!; }
 
             types.AddRange(exported.Where(t => t is { IsClass: true, IsAbstract: false }
-                                               && typeof(ILightPlugin).IsAssignableFrom(t)
+                                               && (typeof(ILightPlugin).IsAssignableFrom(t) || typeof(ILightEffect).IsAssignableFrom(t))
                                                && t.GetConstructor(Type.EmptyTypes) != null));
         }
 
