@@ -686,6 +686,10 @@ public sealed partial class MainWindow : Window
 
         // the settings may have arrived from a cancel, an import or a reset, not from a checkbox
         ApplyScreenPreview();
+
+        // Подписи в рейле могли смениться с языком или с разделом включённого эффекта, а от
+        // ширины рейла считается узкое окно.
+        if (!_scene.ShowCanvas) _canvasShown = null;
         ApplyCanvasVisibility();
 
         // подписи над холстом могли смениться вместе с языком, а с ними и его ширина
@@ -2031,13 +2035,6 @@ public sealed partial class MainWindow : Window
         BuildFixturePanel();
 
         if (_updateCard.Visibility == Visibility.Visible) ShowUpdateCard();
-
-        // Ширина рейла меняется вместе с длиной подписей, а от неё считается узкое окно.
-        if (!_scene.ShowCanvas)
-        {
-            _canvasShown = null;
-            ApplyCanvasVisibility();
-        }
     }
 
     /// <summary>Starts or stops showing the screen on the canvas, per the setting.</summary>
