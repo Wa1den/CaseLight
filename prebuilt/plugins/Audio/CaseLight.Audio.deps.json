@@ -8,10 +8,24 @@
     ".NETCoreApp,Version=v9.0": {
       "CaseLight.Audio/1.0.0": {
         "dependencies": {
-          "NAudio.Wasapi": "2.2.1"
+          "CaseLight.Plugins": "1.0.0",
+          "NAudio.Wasapi": "2.2.1",
+          "runtimepack.Microsoft.Windows.SDK.NET.Ref": "10.0.22621.57"
         },
         "runtime": {
           "CaseLight.Audio.dll": {}
+        }
+      },
+      "runtimepack.Microsoft.Windows.SDK.NET.Ref/10.0.22621.57": {
+        "runtime": {
+          "Microsoft.Windows.SDK.NET.dll": {
+            "assemblyVersion": "10.0.22621.38",
+            "fileVersion": "10.0.22621.55"
+          },
+          "WinRT.Runtime.dll": {
+            "assemblyVersion": "2.2.0.0",
+            "fileVersion": "2.2.0.48161"
+          }
         }
       },
       "NAudio.Core/2.2.1": {
@@ -38,6 +52,11 @@
   "libraries": {
     "CaseLight.Audio/1.0.0": {
       "type": "project",
+      "serviceable": false,
+      "sha512": ""
+    },
+    "runtimepack.Microsoft.Windows.SDK.NET.Ref/10.0.22621.57": {
+      "type": "runtimepack",
       "serviceable": false,
       "sha512": ""
     },

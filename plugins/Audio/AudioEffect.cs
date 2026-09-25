@@ -26,9 +26,10 @@ public sealed class AudioEffect : ILightEffect
 
     readonly AudioSource _source = new();
     readonly Spectrum _spectrum = new();
+    readonly MediaWatch _media = new();
 
     // настройки: пишутся в Configure, читаются в Paint, оба из потока эффектов
-    bool _volumeOn, _volumeAlways, _eqOn;
+    bool _volumeOn, _volumeAlways, _eqOn, _eqMedia;
     int[] _volumeRows = [], _eqRows = [];
     LightColor _fill, _track, _mute, _low, _high;
     double _holdSeconds;
@@ -37,12 +38,15 @@ public sealed class AudioEffect : ILightEffect
 
     bool _configured;
     long _previewTicks;
+    string _volumeSettings = "";
 
     double[] _target = [], _shown = [];
     double _lastSeconds;
     double[] _across = [];
     IReadOnlyList<LedRect>? _acrossFor;
     int _acrossCount = -1;
+
+    static readonly string[] VolumeKeys = ["vol.on", "vol.rows", "vol.fill", "vol.track", "vol.mute", "vol.hold", "vol.always"];
 
     static string T(string ru, string en) => PluginApi.Language == "ru" ? ru : en;
 
@@ -87,6 +91,11 @@ public sealed class AudioEffect : ILightEffect
                      "The spectrum of what the default output device plays: low frequencies on the left, high on the right. The height of a column is the number of rows ticked.")
         },
         new("eq.on", SettingKind.Toggle, T("Показывать спектр", "Show the spectrum")) { Default = "1" },
+        new("eq.media", SettingKind.Toggle, T("Только когда играет медиа", "Only while media plays"))
+        {
+            Help = T("Спектр показывается, пока плеер или браузер что-то играет: то, что Windows показывает в панели мультимедиа у громкости. Звуки системы, игр и голосовых чатов его не включают.",
+                     "The spectrum shows while a player or a browser plays something: what Windows shows in the media panel next to the volume. Sounds of the system, games and voice chats do not bring it on.")
+        },
         new("eq.rows", SettingKind.Rows, T("Ряды спектра", "Rows of the spectrum")) { Default = "0,1,2,3,4,5,6,7,8,9" },
         new("eq.bands", SettingKind.Slider, T("Число полос", "Bands"))
         {
@@ -104,7 +113,7 @@ public sealed class AudioEffect : ILightEffect
         new("eq.gain", SettingKind.Slider, T("Усиление", "Gain"))
         {
             Default = "0", Min = -20, Max = 30, Step = 1, Unit = T(" дБ", " dB"),
-            Help = T("Поднимает все полосы. Нужно, когда при тихой музыке столбцы едва видны; при громкой и большом усилении они стоят под потолком.",
+            Help = T("Поднимает все полосы. Нужно, когда при тихой музыке столбцы едва видны; при громкой и большом усилении они не опускаются ниже верхнего ряда.",
                      "Raises every band. For quiet music whose columns barely show; with loud music and much gain they stay at the top.")
         },
         new("eq.range", SettingKind.Slider, T("Диапазон", "Range"))
@@ -134,6 +143,7 @@ public sealed class AudioEffect : ILightEffect
         _holdSeconds = Math.Max(0.1, values.Number("vol.hold"));
 
         _eqOn = values.Bool("eq.on");
+        _eqMedia = values.Bool("eq.media");
         _eqRows = values.Ints("eq.rows");
         _bands = Math.Clamp(values.Int("eq.bands"), 1, 64);
         _low = values.Color("eq.low");
@@ -149,8 +159,11 @@ public sealed class AudioEffect : ILightEffect
             _shown = new double[_bands];
         }
 
-        // правка в разделе показывает шкалу, чтобы её было видно, пока её настраивают
-        if (_configured) _previewTicks = Environment.TickCount64;
+        // Правка шкалы показывает её, чтобы шкалу было видно, пока её настраивают. Правки
+        // спектра шкалу не зажигают: на клавиатуре она нужна только при смене громкости.
+        string volumeSettings = string.Join("|", VolumeKeys.Select(values.Raw));
+        if (_configured && volumeSettings != _volumeSettings) _previewTicks = Environment.TickCount64;
+        _volumeSettings = volumeSettings;
         _configured = true;
     }
 
@@ -234,10 +247,19 @@ public sealed class AudioEffect : ILightEffect
         var rows = _eqRows.Where(r => r < canvas.Rows.Count).ToArray();
         if (rows.Length == 0) return false;
 
-        _source.WantCapture();
-
         long now = Environment.TickCount64;
-        bool sound = now - _source.LastSoundTicks < StaleSoundMs;
+
+        // Без медиа звук не снимается вовсе: столбцы опускаются, как в тишине.
+        bool media = true;
+        if (_eqMedia)
+        {
+            _media.Want();
+            // Без удержания: после паузы плеера спектр показывал бы остальной звук, голос созвона.
+            media = !_media.Available || _media.Playing;
+        }
+
+        if (media) _source.WantCapture();
+        bool sound = media && now - _source.LastSoundTicks < StaleSoundMs;
 
         if (sound) _spectrum.Measure(_source, _target, _gainDb, _rangeDb);
         else Array.Clear(_target);
@@ -246,7 +268,7 @@ public sealed class AudioEffect : ILightEffect
             _shown[b] = _target[b] >= _shown[b] ? _target[b] : Math.Max(_target[b], _shown[b] - dt / _fallSeconds);
 
         // Устройство без картинки под эффектом отпускается к своей подсветке, когда долго тихо.
-        bool active = now - _source.LastSoundTicks < SilenceHoldMs || _shown.Any(v => v > 0.01);
+        bool active = media && now - _source.LastSoundTicks < SilenceHoldMs || _shown.Any(v => v > 0.01);
         if (!active && !canvas.HasPicture) return false;
 
         var across = Across(canvas);
@@ -288,5 +310,9 @@ public sealed class AudioEffect : ILightEffect
         return _across;
     }
 
-    public void Dispose() => _source.Dispose();
+    public void Dispose()
+    {
+        _source.Dispose();
+        _media.Dispose();
+    }
 }

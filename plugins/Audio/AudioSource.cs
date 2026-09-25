@@ -9,7 +9,7 @@ namespace CaseLight.Audio;
 /// The default output device: its volume, and the sound it plays for the spectrum.
 ///
 /// Everything that touches Core Audio runs on one thread of its own. The default device is
-/// looked up again every couple of seconds, so plugging in headphones moves the level and
+/// looked up again every 2 s, so plugging in headphones moves the level and
 /// the spectrum over to them; a notification client would need the same re-creation and
 /// more code for it.
 /// </summary>
@@ -118,7 +118,7 @@ sealed class AudioSource : IDisposable
                 {
                     capture = StartCapture(device);
 
-                    // устройство занято или ушло: следующая попытка через пару секунд
+                    // устройство занято или ушло: следующая попытка через 2 с
                     if (capture == null) captureRetryAt = now + DeviceCheckMs;
                 }
                 else if (!wanted && capture != null)

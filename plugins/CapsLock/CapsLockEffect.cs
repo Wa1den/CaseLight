@@ -9,8 +9,8 @@ namespace CaseLight.CapsLock;
 /// Lights one LED while Caps Lock is on.
 ///
 /// The LED is chosen by its number rather than by the key: a plugin device reports where
-/// its LEDs are, not which key each one sits under, and a table of keys per keyboard would
-/// be more than one indicator is worth.
+/// its LEDs are, not which key each one sits under, and a table of keys would have to be
+/// kept for every keyboard.
 /// </summary>
 public sealed class CapsLockEffect : ILightEffect
 {

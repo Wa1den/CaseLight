@@ -7,7 +7,7 @@ namespace CaseLight.Audio;
 ///
 /// The scale is set so that a full-scale sine reads 0 dB in its band. Music carries far less
 /// energy at the top than at the bottom, and with a flat scale the right half of the
-/// keyboard stayed dark; the usual analyser tilt of 3 dB per octave around 1 kHz evens it
+/// keyboard stayed dark; a tilt of 3 dB per octave around 1 kHz evens it
 /// out.
 /// </summary>
 sealed class Spectrum

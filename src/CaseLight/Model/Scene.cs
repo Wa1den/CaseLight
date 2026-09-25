@@ -454,7 +454,7 @@ public sealed class Scene
     /// the setting. A key that is missing takes the default the effect declares.
     ///
     /// Replaced whole on every change, like <see cref="Plugins"/>; the paint of effects
-    /// notices a change by the reference.
+    /// tells a change by the reference.
     /// </summary>
     public Dictionary<string, Dictionary<string, string>> Effects { get; set; } = new();
 

@@ -252,7 +252,9 @@ Ready effects are in [prebuilt/plugins](prebuilt/plugins), the sources in
   output device is shown as a bar along the rows chosen after every change, in another
   colour when muted. The spectrum of what that device plays is shown as columns across the
   keyboard; the height of a column is the number of rows chosen. The sound is captured
-  through WASAPI loopback, and only while the spectrum is shown.
+  through WASAPI loopback, and only while the spectrum is shown. The spectrum can be limited
+  to the time a player or a browser plays something: the same sessions Windows shows in the
+  media panel next to the volume.
 * **Caps Lock** ([plugins/CapsLock](plugins/CapsLock)). Lights the LED chosen by number
   while Caps Lock is on. Editing the number lights the LED for 2 s, which makes it easier
   to find.
