@@ -51,7 +51,7 @@ public sealed class AudioEffect : ILightEffect
     static string T(string ru, string en) => PluginApi.Language == "ru" ? ru : en;
 
     public int ApiVersion => PluginApi.Version;
-    public string Name => T("Громкость и эквалайзер", "Volume and equalizer");
+    public string Name => T("Громкость и эквалайзер клавиатуры", "Keyboard volume & equalizer");
     public string Description => T(
         "Уровень громкости полосой по рядам клавиш и спектр звука столбцами по клавиатуре.",
         "The volume level as a bar along rows of keys, and the spectrum of the sound as columns across the keyboard.");
