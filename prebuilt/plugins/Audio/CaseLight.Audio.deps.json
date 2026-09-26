@@ -8,6 +8,7 @@
     ".NETCoreApp,Version=v9.0": {
       "CaseLight.Audio/1.0.2": {
         "dependencies": {
+          "CaseLight.Plugins": "1.0.0",
           "NAudio.Wasapi": "2.2.1",
           "runtimepack.Microsoft.Windows.SDK.NET.Ref": "10.0.22621.57"
         },
