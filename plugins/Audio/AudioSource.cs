@@ -79,7 +79,12 @@ sealed class AudioSource : IDisposable
 
     void Run()
     {
-        using var enumerator = new MMDeviceEnumerator();
+        // Исключение в этом потоке закрыло бы всю программу: без звука эффект просто молчит.
+        MMDeviceEnumerator enumerator;
+        try { enumerator = new MMDeviceEnumerator(); }
+        catch { return; }
+
+        using var _ = enumerator;
         MMDevice? device = null;
         WasapiLoopbackCapture? capture = null;
         string deviceId = "";
