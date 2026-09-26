@@ -62,7 +62,23 @@ public sealed class EffectMixer : IDisposable
         public string Device = "";
         public int Order;
         public bool Failed;
+        public EffectTarget Target;
+        public HashSet<string> Fixtures = new();
     }
+
+    /// <summary>
+    /// The LEDs of one fixture in the frame of the paint loop, for effects on fixtures.
+    /// </summary>
+    /// <param name="Start">First LED of the fixture in the frame.</param>
+    /// <param name="Areas">The area each LED reads the screen from, in millimetres on the plan.</param>
+    public sealed record FixtureRun(string FixtureId, int Start, LedRect[] Areas);
+
+    /// <summary>
+    /// Ids of the fixtures some effect draws on. The paint loop goes on painting a still
+    /// screen about 60 times a second while any of its fixtures is here.
+    /// </summary>
+    public IReadOnlySet<string> FixtureTargets => _fixtureTargets;
+    volatile HashSet<string> _fixtureTargets = new();
 
     readonly PluginHost _plugins;
     readonly Func<Scene> _scene;
@@ -254,6 +270,7 @@ public sealed class EffectMixer : IDisposable
             {
                 bound = new Bound(key, effect);
                 try { bound.Order = effect.Order; } catch { /* порядок по умолчанию */ }
+                try { bound.Target = effect.Target; } catch { /* устройство, как у всех прежних */ }
                 _bound[effect] = bound;
             }
 
@@ -263,11 +280,80 @@ public sealed class EffectMixer : IDisposable
             bound.Values = values;
             bound.Configured = true;
             bound.Failed = false;
-            bound.Device = values != null && values.TryGetValue(EffectValues.DeviceKey, out var d) ? d : "";
+            var parsed = new EffectValues(values ?? new Dictionary<string, string>(), []);
+            bound.Device = bound.Target == EffectTarget.Device ? parsed.Device : "";
+            bound.Fixtures = bound.Target == EffectTarget.Fixtures ? new HashSet<string>(parsed.Fixtures) : new();
 
             try { effect.Configure(new EffectValues(values ?? new Dictionary<string, string>(), effect.Settings)); }
             catch (Exception ex) { Fail(bound, ex); }
         }
+
+        _fixtureTargets = _bound.Values.Where(b => b.Target == EffectTarget.Fixtures && !b.Failed)
+                                       .SelectMany(b => b.Fixtures).ToHashSet();
+    }
+
+    /// <summary>
+    /// Draws the effects on fixtures over the frame of the paint loop, in place. Called by
+    /// the paint loop between the colour pass and the write to the devices.
+    /// </summary>
+    /// <param name="output">Three bytes per LED, in the order of the runs.</param>
+    /// <returns>Whether any effect drew.</returns>
+    public bool PaintFixtures(IReadOnlyList<FixtureRun> runs, byte[] output)
+    {
+        if (_fixtureTargets.Count == 0) return false;
+        bool any = false;
+
+        lock (_gate)
+        {
+            double seconds = _clock.Elapsed.TotalSeconds;
+
+            foreach (var bound in _bound.Values.OrderBy(b => b.Order))
+            {
+                if (bound.Failed || bound.Target != EffectTarget.Fixtures || bound.Fixtures.Count == 0) continue;
+
+                var chosen = runs.Where(r => bound.Fixtures.Contains(r.FixtureId)).ToArray();
+                if (chosen.Length == 0) continue;
+
+                int total = chosen.Sum(r => r.Areas.Length);
+                var frame = new byte[total * 3];
+                var layout = new LedRect[total];
+                var parts = new int[chosen.Length][];
+
+                int at = 0;
+                for (int c = 0; c < chosen.Length; c++)
+                {
+                    var run = chosen[c];
+                    int n = run.Areas.Length;
+
+                    Buffer.BlockCopy(output, run.Start * 3, frame, at * 3, n * 3);
+                    run.Areas.CopyTo(layout, at);
+                    parts[c] = Enumerable.Range(at, n).ToArray();
+                    at += n;
+                }
+
+                // рядов у фигур нет: их диоды разбросаны по плану, а не стоят сеткой
+                var canvas = new EffectCanvas(frame, layout, [], hasPicture: true, seconds)
+                {
+                    Parts = parts
+                };
+
+                bool drew;
+                try { drew = bound.Effect.Paint(canvas); }
+                catch (Exception ex) { Fail(bound, ex); continue; }
+
+                if (!drew) continue;
+                any = true;
+
+                at = 0;
+                foreach (var run in chosen)
+                {
+                    Buffer.BlockCopy(frame, at * 3, output, run.Start * 3, run.Areas.Length * 3);
+                    at += run.Areas.Length;
+                }
+            }
+        }
+
+        return any;
     }
 
     void ForgetGoneDevices()

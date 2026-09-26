@@ -159,6 +159,9 @@ public sealed class RgbHub : IDisposable
     /// <summary>Sends every frame of a plugin device, and every release, through the effects.</summary>
     public void AttachEffects(EffectMixer mixer) => _mixer = mixer;
 
+    /// <summary>The effects attached, for the paint loop to draw those on fixtures.</summary>
+    public EffectMixer? Effects => _mixer;
+
     /// <summary>Takes the devices of plugins into the list, now and whenever they change.</summary>
     public void AttachPlugins(PluginHost host)
     {

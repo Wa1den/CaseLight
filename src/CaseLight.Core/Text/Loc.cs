@@ -20,7 +20,7 @@ public static class Loc
     /// silently shadowed newly reworded labels, so a mismatched version rewrites it. Only
     /// the two built-in files are rewritten; added languages are left alone.
     /// </summary>
-    const string Version = "20";
+    const string Version = "21";
 
     /// <summary>
     /// Bookkeeping entries rather than translated text: the version a file was written
@@ -271,6 +271,10 @@ public static class Loc
         ["effects.norows"] = "Ряды появятся после выбора устройства.",
         ["effects.row"] = "{0} ({1})",
         ["effects.ledrange"] = "Номер от 1 до {0}.",
+        ["effects.fixtures"] = "Фигуры",
+        ["effects.fixtures.note"] = "Фигуры плана, на которых рисуется эффект, на любых устройствах. Эффект берёт положение, размер и поворот фигур с холста и рисует поверх уже обработанных цветов, после яркости и цветовых настроек. Пока он рисует, кадры идут и при неподвижном экране, около 60 в секунду; делитель частоты фигуры при этом сохраняется.",
+        ["effects.nofixtures"] = "На плане нет фигур.",
+        ["effects.fixtureoff"] = "{0} (выключена)",
         ["tab.devices"] = "Устройства",
         ["tab.capture"] = "Захват",
         ["tab.crop"] = "Кадрирование",
@@ -543,6 +547,10 @@ public static class Loc
         ["effects.norows"] = "The rows appear once a device is chosen.",
         ["effects.row"] = "{0} ({1})",
         ["effects.ledrange"] = "A number from 1 to {0}.",
+        ["effects.fixtures"] = "Fixtures",
+        ["effects.fixtures.note"] = "Fixtures of the plan the effect is drawn on, on any device. The effect takes the position, size and rotation of the fixtures from the canvas and draws over the colours already processed, after brightness and the colour settings. While it draws, frames go out on a still screen too, about 60 a second; the update divider of a fixture still applies.",
+        ["effects.nofixtures"] = "The plan has no fixtures.",
+        ["effects.fixtureoff"] = "{0} (switched off)",
         ["tab.devices"] = "Devices",
         ["tab.capture"] = "Capture",
         ["tab.crop"] = "Cropping",

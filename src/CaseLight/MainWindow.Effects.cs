@@ -28,12 +28,14 @@ public sealed partial class MainWindow
         {
             string name, icon;
             IReadOnlyList<EffectSetting> settings;
+            EffectTarget target;
 
             try
             {
                 name = effect.Name;
                 icon = effect.Icon;
                 settings = effect.Settings;
+                target = effect.Target;
             }
             catch (Exception ex)
             {
@@ -47,12 +49,12 @@ public sealed partial class MainWindow
             AddSection(name, icon, panel =>
             {
                 if (missing != "") panel.Children.Add(Ui.Warning(missing));
-                BuildEffectPage(panel, key, settings);
+                BuildEffectPage(panel, key, settings, target);
             });
         }
     }
 
-    void BuildEffectPage(StackPanel panel, string key, IReadOnlyList<EffectSetting> settings)
+    void BuildEffectPage(StackPanel panel, string key, IReadOnlyList<EffectSetting> settings, EffectTarget target)
     {
         var stored = _scene.Effects.TryGetValue(key, out var v) ? v : new Dictionary<string, string>();
         var values = new EffectValues(stored, settings);
@@ -68,6 +70,18 @@ public sealed partial class MainWindow
 
             _scene.Effects = new Dictionary<string, Dictionary<string, string>>(_scene.Effects) { [key] = inner };
             Touch();
+        }
+
+        if (target == EffectTarget.Fixtures)
+        {
+            panel.Children.Add(BuildFixtureChoice(values, Set));
+
+            foreach (var s in settings)
+            {
+                try { panel.Children.Add(BuildEffectSetting(s, values, [], 0, Set)); }
+                catch (Exception ex) { ProbeLog.Log(Loc.P("эффекты", "effects"), key + "." + s.Key + ": " + ex.Message); }
+            }
+            return;
         }
 
         // ---- устройство
@@ -183,6 +197,46 @@ public sealed partial class MainWindow
             default:
                 return new TextBlock();
         }
+    }
+
+    /// <summary>
+    /// A checkbox per fixture of the plan, for an effect drawn on fixtures. Switched-off
+    /// fixtures are listed too: the choice is kept, and the effect shows once the fixture is
+    /// on again.
+    /// </summary>
+    UIElement BuildFixtureChoice(EffectValues values, Action<string, string> set)
+    {
+        var panel = new StackPanel { Margin = new Thickness(0, 4, 0, 4) };
+        panel.Children.Add(Ui.Caption(Loc.T("effects.fixtures"), Loc.T("effects.fixtures.note")));
+
+        Model.Fixture[] fixtures;
+        lock (_scene.Fixtures) fixtures = _scene.Fixtures.ToArray();
+
+        if (fixtures.Length == 0)
+        {
+            panel.Children.Add(Ui.Note(Loc.T("effects.nofixtures")));
+            return panel;
+        }
+
+        // порядок выбора не важен, а фигура, удалённая с плана, из списка уходит при первой правке
+        var picked = new HashSet<string>(values.Fixtures);
+
+        foreach (var f in fixtures)
+        {
+            var fixture = f;
+            string label = fixture.Enabled ? fixture.Name : string.Format(Loc.T("effects.fixtureoff"), fixture.Name);
+
+            panel.Children.Add(Ui.Check(label, picked.Contains(fixture.Id), on =>
+            {
+                if (on) picked.Add(fixture.Id);
+                else picked.Remove(fixture.Id);
+
+                var present = fixtures.Select(x => x.Id).Where(picked.Contains);
+                set(EffectValues.FixturesKey, string.Join(",", present));
+            }));
+        }
+
+        return panel;
     }
 
     /// <summary>A checkbox per row of the device, numbered from the top.</summary>

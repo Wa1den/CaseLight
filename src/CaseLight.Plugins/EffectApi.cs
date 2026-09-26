@@ -10,9 +10,10 @@ namespace CaseLight.Plugins;
 ///
 /// The program finds it the same way as <see cref="ILightPlugin"/>: a public non-abstract
 /// class in the DLLs of the plugins folder, created with a parameterless constructor. It
-/// gets a section of its own in the window, built from <see cref="Settings"/>, with the
-/// device to draw on chosen at the top. The values are kept in the program's settings and
-/// handed over through <see cref="Configure"/>.
+/// gets a section of its own in the window, built from <see cref="Settings"/>, with what it
+/// draws on chosen at the top: a device of a plugin or fixtures of the plan, as
+/// <see cref="Target"/> says. The values are kept in the program's settings and handed over
+/// through <see cref="Configure"/>.
 ///
 /// Effects draw only while the painting runs. Pause, stop, a locked session and sleep take
 /// them off along with the picture.
@@ -45,6 +46,9 @@ public interface ILightEffect : IDisposable
     /// </summary>
     IReadOnlyList<string> Requires => [];
 
+    /// <summary>What the effect draws on, and so what its section offers to choose.</summary>
+    EffectTarget Target => EffectTarget.Device;
+
     /// <summary>
     /// What the section offers, top to bottom, in the interface language. Read again
     /// whenever the section is built, so labels follow a change of language.
@@ -59,20 +63,41 @@ public interface ILightEffect : IDisposable
 
     /// <summary>
     /// Hands over the values of <see cref="Settings"/>: before the first
-    /// <see cref="Paint"/> and after every change in the section, from the thread that
-    /// calls <see cref="Paint"/>, never at the same time as it.
+    /// <see cref="Paint"/> and after every change in the section, never at the same time
+    /// as <see cref="Paint"/>.
     /// </summary>
     void Configure(EffectValues values);
 
     /// <summary>
     /// Draws one frame over the canvas. Called about 60 times a second for as long as the
-    /// effect has a device and the painting runs, so it must not wait for anything.
+    /// effect has a device or fixtures and the painting runs, so it must not wait for
+    /// anything. An effect on fixtures is called from the paint loop, and the time it takes
+    /// holds up every device.
     /// </summary>
     /// <returns>
     /// Whether anything was drawn. A device that has no picture from the screen under it
     /// is let go to its own effect when nothing on it draws.
     /// </returns>
     bool Paint(EffectCanvas canvas);
+}
+
+/// <summary>What an effect draws on.</summary>
+public enum EffectTarget
+{
+    /// <summary>
+    /// One device of a plugin, chosen by name. The canvas holds every LED of the device and
+    /// its layout as the plugin reports it.
+    /// </summary>
+    Device,
+
+    /// <summary>
+    /// Fixtures of the plan, any number of them, on any device. The canvas holds the LEDs
+    /// of the fixtures chosen, one <see cref="EffectCanvas.Parts"/> entry per fixture, with
+    /// the area each LED reads the screen from as its layout: millimetres on the plan, Y
+    /// growing downwards. The effect draws over the colours after brightness and the rest
+    /// of the colour settings.
+    /// </summary>
+    Fixtures
 }
 
 /// <summary>What a setting edits and how it is shown.</summary>
@@ -140,6 +165,9 @@ public sealed class EffectValues
     /// <summary>Key under which the program keeps the name of the device chosen.</summary>
     public const string DeviceKey = "device";
 
+    /// <summary>Key under which the program keeps the fixtures chosen, their ids comma separated.</summary>
+    public const string FixturesKey = "fixtures";
+
     readonly IReadOnlyDictionary<string, string> _values;
     readonly Dictionary<string, string> _defaults;
 
@@ -154,6 +182,9 @@ public sealed class EffectValues
 
     /// <summary>Name of the device the effect draws on; empty if none is chosen.</summary>
     public string Device => Raw(DeviceKey);
+
+    /// <summary>Ids of the fixtures chosen, for an effect on <see cref="EffectTarget.Fixtures"/>.</summary>
+    public string[] Fixtures => Raw(FixturesKey).Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
 
     /// <summary>The value as it is kept; empty for a key no setting declares.</summary>
     public string Raw(string key) =>
@@ -250,8 +281,20 @@ public sealed class EffectCanvas
     /// <summary>Where each LED is, as the device reports it; null if it does not.</summary>
     public IReadOnlyList<LedRect>? Layout { get; }
 
-    /// <summary>The rows of <see cref="LedGrid.Rows"/> for this device.</summary>
+    /// <summary>The rows of <see cref="LedGrid.Rows"/> for this device; empty on a canvas of fixtures.</summary>
     public IReadOnlyList<int[]> Rows { get; }
+
+    IReadOnlyList<int[]>? _parts;
+
+    /// <summary>
+    /// The LEDs grouped by where they come from: one entry per fixture on a canvas of
+    /// fixtures, a single entry with every LED on a canvas of a device.
+    /// </summary>
+    public IReadOnlyList<int[]> Parts
+    {
+        get => _parts ??= [Enumerable.Range(0, LedCount).ToArray()];
+        init => _parts = value;
+    }
 
     /// <summary>Whether a picture from the screen is under the effects.</summary>
     public bool HasPicture { get; }

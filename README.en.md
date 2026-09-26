@@ -229,32 +229,45 @@ dotnet publish plugins/NuPhy -c Release -o "%AppData%\CaseLight\plugins\NuPhy"
 
 ### Effects
 
-An effect is a plugin that draws over the frame of a plugin device: an indicator, a bar, a
+An effect is a plugin that draws over the picture from the screen: an indicator, a bar, a
 spectrum. It is switched on in the same «Plugins» section and adds a section of its own to
-the window, where the device is chosen and the settings of the effect are set; they are
-kept in `config.json` with the rest. An effect shows while the painting runs and lies over
-the picture from the screen. With no fixtures on the device it has black under it, and when
-there is nothing to show the device goes back to its own lighting. Effects draw only on
-devices of plugins, so without a device plugin switched on the «Plugins» section shows a
-warning.
+the window, where what it draws on is chosen and its settings are set; they are kept in
+`config.json` with the rest. An effect shows while the painting runs.
+
+An effect draws on one of two kinds of target:
+
+* **A plugin device** as a whole, a keyboard for one. With no fixtures on the device it has
+  black under it, and when there is nothing to show the device goes back to its own
+  lighting. Without a device plugin switched on the «Plugins» section shows a warning.
+* **Fixtures of the plan** on any devices, OpenRGB ones included. The effect gets the areas
+  of the LEDs on the plan in millimetres, that is the position, size and rotation of the
+  fixtures, and draws over the colours already processed. While it draws, frames go out
+  about 60 times a second on a still screen too; the update divider of a fixture still
+  applies.
 
 An effect implements `ILightEffect` from the same contract
 ([EffectApi.cs](src/CaseLight.Plugins/EffectApi.cs)). It describes its settings as a list
 of `EffectSetting` (checkbox, slider, list, colour, rows of the device, LED number), and the
-program builds the page from that. `Paint` is called about 60 times a second and draws on
-an `EffectCanvas`; the rows of LEDs come from the layout of the device (`LedGrid`). The
-`Requires` property names the device plugins the effect is made for; empty means any.
+program builds the page from that. The `Target` property picks the target: a device or
+fixtures. `Paint` is called about 60 times a second and draws on an `EffectCanvas`; on a
+device the rows of LEDs come from its layout (`LedGrid`), on fixtures the canvas is split
+into parts, one per fixture (`Parts`). The `Requires` property names the device plugins the
+effect is made for; empty means any.
 
 Ready effects are in [prebuilt/plugins](prebuilt/plugins), the sources in
 [plugins](plugins):
 
-* **Volume and equalizer** ([plugins/Audio](plugins/Audio)). The volume of the default
+* **Keyboard volume & equalizer** ([plugins/Audio](plugins/Audio)). The volume of the default
   output device is shown as a bar along the rows chosen after every change, in another
   colour when muted. The spectrum of what that device plays is shown as columns across the
   keyboard; the height of a column is the number of rows chosen. The sound is captured
   through WASAPI loopback, and only while the spectrum is shown. The spectrum can be limited
   to the time a player or a browser plays something: the same sessions Windows shows in the
   media panel next to the volume.
+* **Equalizer** ([plugins/Equalizer](plugins/Equalizer)). The same spectrum on the
+  fixtures of the plan chosen. The columns are laid over the rectangle the fixtures take up
+  on the canvas, one for all of them or one each: three fans in a row show one wide
+  spectrum or a spectrum each. For strips there is the overall level along the long side.
 * **Caps Lock** ([plugins/CapsLock](plugins/CapsLock)). Lights the LED chosen by number
   while Caps Lock is on. Editing the number lights the LED for 2 s, which makes it easier
   to find.

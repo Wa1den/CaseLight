@@ -284,6 +284,10 @@ public sealed class PluginHost : IDisposable
 
             foreach (var effect in entry.Effects)
             {
+                // эффекту на фигурах плагин устройств не нужен: фигуры бывают на любом устройстве
+                try { if (effect.Target == EffectTarget.Fixtures) continue; }
+                catch { /* сломанный эффект считается эффектом на устройстве */ }
+
                 IReadOnlyList<string> wanted;
                 try { wanted = effect.Requires; }
                 catch { wanted = []; }
