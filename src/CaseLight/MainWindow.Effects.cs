@@ -201,8 +201,8 @@ public sealed partial class MainWindow
 
     /// <summary>
     /// A checkbox per fixture of the plan, for an effect drawn on fixtures. Switched-off
-    /// fixtures are listed too: the choice is kept, and the effect shows once the fixture is
-    /// on again.
+    /// fixtures are listed too: the paint loop takes them in for the effect alone, over
+    /// black.
     /// </summary>
     UIElement BuildFixtureChoice(EffectValues values, Action<string, string> set)
     {

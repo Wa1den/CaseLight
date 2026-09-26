@@ -75,7 +75,8 @@ public sealed class EffectMixer : IDisposable
 
     /// <summary>
     /// Ids of the fixtures some effect draws on. The paint loop goes on painting a still
-    /// screen about 60 times a second while any of its fixtures is here.
+    /// screen about 60 times a second while any of its fixtures is here, and paints the
+    /// switched-off ones among them for the effects alone. Replaced only when the ids change.
     /// </summary>
     public IReadOnlySet<string> FixtureTargets => _fixtureTargets;
     volatile HashSet<string> _fixtureTargets = new();
@@ -288,8 +289,11 @@ public sealed class EffectMixer : IDisposable
             catch (Exception ex) { Fail(bound, ex); }
         }
 
-        _fixtureTargets = _bound.Values.Where(b => b.Target == EffectTarget.Fixtures && !b.Failed)
-                                       .SelectMany(b => b.Fixtures).ToHashSet();
+        var targets = _bound.Values.Where(b => b.Target == EffectTarget.Fixtures && !b.Failed)
+                                   .SelectMany(b => b.Fixtures).ToHashSet();
+
+        // замена только при настоящей смене: по ссылке раскраска узнаёт, что пора перестроиться
+        if (!targets.SetEquals(_fixtureTargets)) _fixtureTargets = targets;
     }
 
     /// <summary>

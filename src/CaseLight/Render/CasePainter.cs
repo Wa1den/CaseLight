@@ -85,6 +85,9 @@ public sealed class CasePainter : IDisposable
         public readonly ColorPipeline Pipe = new();
         public byte[] In = Array.Empty<byte>();
         public byte[] Out = Array.Empty<byte>();
+
+        /// <summary>A switched-off fixture an effect draws on: black under the effect instead of the screen.</summary>
+        public bool EffectOnly;
     }
 
     readonly RgbHub _hub;
@@ -128,6 +131,9 @@ public sealed class CasePainter : IDisposable
 
     /// <summary>The LEDs of each fixture, for effects drawn on fixtures.</summary>
     EffectMixer.FixtureRun[] _runs = Array.Empty<EffectMixer.FixtureRun>();
+
+    /// <summary>The fixtures of effects the last rebuild saw; a new set brings switched-off fixtures in or out.</summary>
+    IReadOnlySet<string>? _effectTargetsBuilt;
 
     /// <summary>
     /// How often frames of effects on fixtures are painted while the screen stands still:
@@ -537,7 +543,8 @@ public sealed class CasePainter : IDisposable
 
             // A reconnect renumbers the controllers, so resolved indices have to be redone
             // before they address the wrong hardware.
-            if (_rebuild || _hub.Generation != _resolvedGeneration)
+            if (_rebuild || _hub.Generation != _resolvedGeneration
+                || !ReferenceEquals(_hub.Effects?.FixtureTargets, _effectTargetsBuilt))
             {
                 _rebuild = false;
                 Rebuild();
@@ -1101,6 +1108,12 @@ public sealed class CasePainter : IDisposable
             int bytes = g.Count * 3;
             if (g.Start * 3 + bytes > _sampled.Length) continue;
 
+            if (g.EffectOnly)
+            {
+                Array.Clear(_output, g.Start * 3, bytes);
+                continue;
+            }
+
             Array.Copy(_sampled, g.Start * 3, g.In, 0, bytes);
             g.Pipe.Process(g.In, g.Out, g.Settings, g.Count, dtMs);
             NeutraliseShadows(g.Out, g.ShadowNeutral);
@@ -1186,9 +1199,14 @@ public sealed class CasePainter : IDisposable
         Fixture[] fixtures;
         lock (_scene.Fixtures) fixtures = _scene.Fixtures.ToArray();
 
+        // Выключенная фигура, на которой рисует эффект, остаётся в раскраске без экрана.
+        var effectTargets = _hub.Effects?.FixtureTargets;
+        _effectTargetsBuilt = effectTargets;
+
         foreach (var f in fixtures)
         {
-            if (!f.Enabled || f.Binding.LedCount <= 0) continue;
+            bool effectOnly = !f.Enabled && effectTargets != null && effectTargets.Contains(f.Id);
+            if (!f.Enabled && !effectOnly || f.Binding.LedCount <= 0) continue;
             if (!_hub.TryResolve(f.Binding, out int device, out int firstGlobal, out int available)) continue;
 
             // A device shared by several fixtures runs at the fastest rate any of them asks
@@ -1240,6 +1258,7 @@ public sealed class CasePainter : IDisposable
                     Count = taken,
                     Settings = ColourSettingsFor(f),
                     ShadowNeutral = f.BrightnessOverride ? f.ShadowNeutral : _scene.ShadowNeutral,
+                    EffectOnly = effectOnly,
                     In = new byte[taken * 3],
                     Out = new byte[taken * 3]
                 });

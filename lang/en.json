@@ -32,7 +32,7 @@
   "effects.row": "{0} ({1})",
   "effects.ledrange": "A number from 1 to {0}.",
   "effects.fixtures": "Fixtures",
-  "effects.fixtures.note": "Fixtures of the plan the effect is drawn on, on any device. The effect takes the position, size and rotation of the fixtures from the canvas and draws over the colours already processed, after brightness and the colour settings. While it draws, frames go out on a still screen too, about 60 a second; the update divider of a fixture still applies.",
+  "effects.fixtures.note": "Fixtures of the plan the effect is drawn on, on any device. The effect takes the position, size and rotation of the fixtures from the canvas and draws over the colours already processed, after brightness and the colour settings. While it draws, frames go out on a still screen too, about 60 a second; the update divider of a fixture still applies. A switched-off fixture shows the effect too, over black rather than the picture from the screen.",
   "effects.nofixtures": "The plan has no fixtures.",
   "effects.fixtureoff": "{0} (switched off)",
   "tab.devices": "Devices",
@@ -256,5 +256,5 @@
   "unit.s": " s",
   "off": "off",
   "_name": "English",
-  "_version": "21"
+  "_version": "22"
 }

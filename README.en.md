@@ -243,7 +243,8 @@ An effect draws on one of two kinds of target:
   of the LEDs on the plan in millimetres, that is the position, size and rotation of the
   fixtures, and draws over the colours already processed. While it draws, frames go out
   about 60 times a second on a still screen too; the update divider of a fixture still
-  applies.
+  applies. A switched-off fixture shows the effect too, over black rather than the picture
+  from the screen.
 
 An effect implements `ILightEffect` from the same contract
 ([EffectApi.cs](src/CaseLight.Plugins/EffectApi.cs)). It describes its settings as a list
