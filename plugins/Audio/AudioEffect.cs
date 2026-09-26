@@ -267,9 +267,10 @@ public sealed class AudioEffect : ILightEffect
         for (int b = 0; b < _bands; b++)
             _shown[b] = _target[b] >= _shown[b] ? _target[b] : Math.Max(_target[b], _shown[b] - dt / _fallSeconds);
 
-        // Устройство без картинки под эффектом отпускается к своей подсветке, когда долго тихо.
+        // Когда долго тихо или медиа не играет, спектр не рисуется вовсе: подложка «Под столбцами»
+        // гасила бы картинку с экрана и без столбцов, а устройство без картинки отпускается.
         bool active = media && now - _source.LastSoundTicks < SilenceHoldMs || _shown.Any(v => v > 0.01);
-        if (!active && !canvas.HasPicture) return false;
+        if (!active) return false;
 
         var across = Across(canvas);
         int k = rows.Length;
