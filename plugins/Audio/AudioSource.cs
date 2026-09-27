@@ -79,7 +79,7 @@ sealed class AudioSource : IDisposable
 
     void Run()
     {
-        // Исключение в этом потоке закрыло бы всю программу: без звука эффект просто молчит.
+        // Исключение в этом потоке закрыло бы всю программу: без звука эффект остаётся без шкалы и спектра.
         MMDeviceEnumerator enumerator;
         try { enumerator = new MMDeviceEnumerator(); }
         catch { return; }
