@@ -223,7 +223,7 @@ public sealed class EqualizerEffect : ILightEffect
                 : _shown[Math.Clamp((int)(across * _bands), 0, _bands - 1)];
 
             double lit = to - from > 1e-9 ? Math.Clamp((level - from) / (to - from), 0, 1) : level > from ? 1 : 0;
-            var colour = _low.Lerp(_high, (from + to) / 2).Scale(_brightness);
+            var colour = Blend(_low, _high, (from + to) / 2).Scale(_brightness);
 
             var under = _under switch
             {
@@ -234,6 +234,31 @@ public sealed class EqualizerEffect : ILightEffect
 
             canvas.Set(led, under.Lerp(colour, lit));
         }
+    }
+
+    /// <summary>Exponent between the byte an LED is driven with and how bright it looks.</summary>
+    const double Perceived = 2.2;
+
+    /// <summary>
+    /// The colour at <paramref name="t"/> of the scale from <paramref name="from"/> to
+    /// <paramref name="to"/>, even to the eye.
+    ///
+    /// An LED gives light in proportion to its byte, and the eye tells dim light apart far
+    /// better than bright. Mixed by bytes, the channel the end colour adds was plain long
+    /// before the middle: from violet to turquoise the green took over at about a fifth of
+    /// the scale. Mixed after the exponent, the middle of the scale looks like the middle.
+    /// </summary>
+    static LightColor Blend(LightColor from, LightColor to, double t)
+    {
+        t = Math.Clamp(t, 0, 1);
+
+        static byte Channel(byte a, byte b, double t)
+        {
+            double x = Math.Pow(a / 255.0, 1 / Perceived), y = Math.Pow(b / 255.0, 1 / Perceived);
+            return (byte)Math.Round(Math.Pow(x + (y - x) * t, Perceived) * 255);
+        }
+
+        return new LightColor(Channel(from.R, to.R, t), Channel(from.G, to.G, t), Channel(from.B, to.B, t));
     }
 
     public void Dispose()
