@@ -1,6 +1,7 @@
 using System;
+using CaseLight.Audio;
 
-namespace CaseLight.Audio;
+namespace CaseLight.Equalizer;
 
 /// <summary>
 /// Levels of logarithmic frequency bands from a window of samples, 0..1 each.

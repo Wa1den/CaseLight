@@ -85,6 +85,9 @@ public sealed class CasePainter : IDisposable
         public readonly ColorPipeline Pipe = new();
         public byte[] In = Array.Empty<byte>();
         public byte[] Out = Array.Empty<byte>();
+
+        /// <summary>A switched-off fixture an effect draws on: black under the effect instead of the screen.</summary>
+        public bool EffectOnly;
     }
 
     readonly RgbHub _hub;
@@ -125,6 +128,24 @@ public sealed class CasePainter : IDisposable
 
     /// <summary>The patch of scene each LED averages, in millimetres, for the placement test.</summary>
     Rect[] _areas = Array.Empty<Rect>();
+
+    /// <summary>The LEDs of each fixture, for effects drawn on fixtures.</summary>
+    EffectMixer.FixtureRun[] _runs = Array.Empty<EffectMixer.FixtureRun>();
+
+    /// <summary>The fixtures of effects the last rebuild saw; a new set brings switched-off fixtures in or out.</summary>
+    IReadOnlySet<string>? _effectTargetsBuilt;
+
+    /// <summary>
+    /// How often frames of effects on fixtures are painted while the screen stands still:
+    /// about 60 a second, what a spectrum needs to move smoothly.
+    /// </summary>
+    const double EffectPeriodMs = 16;
+
+    readonly System.Diagnostics.Stopwatch _effectClock = System.Diagnostics.Stopwatch.StartNew();
+    double _lastPaintMs;
+
+    /// <summary>Whether effects drew on the last frame: the frame after they stop has to go out without them.</summary>
+    bool _effectsDrew;
 
     /// <summary>How often each device is written, in frames. Slow buses get a larger number.</summary>
     readonly Dictionary<int, int> _deviceDivider = new();
@@ -522,7 +543,8 @@ public sealed class CasePainter : IDisposable
 
             // A reconnect renumbers the controllers, so resolved indices have to be redone
             // before they address the wrong hardware.
-            if (_rebuild || _hub.Generation != _resolvedGeneration)
+            if (_rebuild || _hub.Generation != _resolvedGeneration
+                || !ReferenceEquals(_hub.Effects?.FixtureTargets, _effectTargetsBuilt))
             {
                 _rebuild = false;
                 Rebuild();
@@ -565,7 +587,10 @@ public sealed class CasePainter : IDisposable
             // time: the smoothing and the hold behind the crop.
             double now = clock.Elapsed.TotalMilliseconds;
 
+            // Нового кадра экрана нет, но эффектам на фигурах нужен свой темп: тогда кадр
+            // собирается из прежних цветов экрана.
             var test = _test;
+            bool screenFrame = true;
             if (test != null)
             {
                 FillFromTest(test);
@@ -574,11 +599,13 @@ public sealed class CasePainter : IDisposable
             else if (_scene.CaptureSource == CaptureSource.FromRimlight)
             {
                 StopCapture();
-                if (!TakeSharedFrame(periodMs, now)) continue;
+                screenFrame = TakeSharedFrame(periodMs, now);
+                if (!screenFrame && !EffectFrameDue()) continue;
             }
-            else if (!TakeOwnFrame(periodMs, now))
+            else
             {
-                continue;
+                screenFrame = TakeOwnFrame(periodMs, now);
+                if (!screenFrame && !EffectFrameDue()) continue;
             }
 
             double dt = now - lastMs;
@@ -603,7 +630,14 @@ public sealed class CasePainter : IDisposable
             {
                 ProcessColour(dt <= 0 ? periodMs : dt);
 
-                nothingToWrite = _paused || _frozen || _dueNow.Count == 0;
+                // Эффекты рисуют поверх готовых цветов; кадр без нового экрана и без эффектов
+                // ничем не отличается от уже отправленного.
+                bool drew = _hub.Effects?.PaintFixtures(_runs, _output) ?? false;
+                bool changed = screenFrame || drew || _effectsDrew;
+                _effectsDrew = drew;
+                _lastPaintMs = _effectClock.Elapsed.TotalMilliseconds;
+
+                nothingToWrite = _paused || _frozen || _dueNow.Count == 0 || !changed;
                 if (!nothingToWrite) linkLost = !WriteFrameLocked(_dueNow);
             }
 
@@ -635,6 +669,21 @@ public sealed class CasePainter : IDisposable
 
             pacer.Wait(periodMs);
         }
+    }
+
+    /// <summary>
+    /// Whether a frame for effects on fixtures is due although the screen gave none: one of
+    /// the fixtures painted has an effect, and the last frame went out long enough ago. Not
+    /// while the source is gone or the display is off; the case is dark then.
+    /// </summary>
+    bool EffectFrameDue()
+    {
+        if (_sourceLost || _captureSuspended || _runs.Length == 0) return false;
+
+        var targets = _hub.Effects?.FixtureTargets;
+        if (targets == null || targets.Count == 0 || !_runs.Any(r => targets.Contains(r.FixtureId))) return false;
+
+        return _effectClock.Elapsed.TotalMilliseconds - _lastPaintMs >= EffectPeriodMs;
     }
 
     /// <summary>
@@ -1059,6 +1108,12 @@ public sealed class CasePainter : IDisposable
             int bytes = g.Count * 3;
             if (g.Start * 3 + bytes > _sampled.Length) continue;
 
+            if (g.EffectOnly)
+            {
+                Array.Clear(_output, g.Start * 3, bytes);
+                continue;
+            }
+
             Array.Copy(_sampled, g.Start * 3, g.In, 0, bytes);
             g.Pipe.Process(g.In, g.Out, g.Settings, g.Count, dtMs);
             NeutraliseShadows(g.Out, g.ShadowNeutral);
@@ -1128,6 +1183,7 @@ public sealed class CasePainter : IDisposable
         var world = new List<Point>();
         var areas = new List<Rect>();
         var groups = new List<Group>();
+        var runs = new List<EffectMixer.FixtureRun>();
 
         _deviceDivider.Clear();
 
@@ -1143,9 +1199,14 @@ public sealed class CasePainter : IDisposable
         Fixture[] fixtures;
         lock (_scene.Fixtures) fixtures = _scene.Fixtures.ToArray();
 
+        // Выключенная фигура, на которой рисует эффект, остаётся в раскраске без экрана.
+        var effectTargets = _hub.Effects?.FixtureTargets;
+        _effectTargetsBuilt = effectTargets;
+
         foreach (var f in fixtures)
         {
-            if (!f.Enabled || f.Binding.LedCount <= 0) continue;
+            bool effectOnly = !f.Enabled && effectTargets != null && effectTargets.Contains(f.Id);
+            if (!f.Enabled && !effectOnly || f.Binding.LedCount <= 0) continue;
             if (!_hub.TryResolve(f.Binding, out int device, out int firstGlobal, out int available)) continue;
 
             // A device shared by several fixtures runs at the fastest rate any of them asks
@@ -1187,12 +1248,17 @@ public sealed class CasePainter : IDisposable
 
             int taken = zones.Count - start;
             if (taken > 0)
+                runs.Add(new EffectMixer.FixtureRun(f.Id, start,
+                    areas.Skip(start).Select(a => new CaseLight.Plugins.LedRect(a.X, a.Y, a.Width, a.Height)).ToArray()));
+
+            if (taken > 0)
                 groups.Add(new Group
                 {
                     Start = start,
                     Count = taken,
                     Settings = ColourSettingsFor(f),
                     ShadowNeutral = f.BrightnessOverride ? f.ShadowNeutral : _scene.ShadowNeutral,
+                    EffectOnly = effectOnly,
                     In = new byte[taken * 3],
                     Out = new byte[taken * 3]
                 });
@@ -1203,6 +1269,7 @@ public sealed class CasePainter : IDisposable
         _targets = targets.ToArray();
         _world = world.ToArray();
         _areas = areas.ToArray();
+        _runs = runs.ToArray();
         _sampled = new byte[_zones.Length * 3];
         _output = new byte[_zones.Length * 3];
 

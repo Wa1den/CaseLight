@@ -284,6 +284,10 @@ public sealed class PluginHost : IDisposable
 
             foreach (var effect in entry.Effects)
             {
+                // эффекту на фигурах плагин устройств не нужен: фигуры бывают на любом устройстве
+                try { if (effect.Target == EffectTarget.Fixtures) continue; }
+                catch { /* сломанный эффект считается эффектом на устройстве */ }
+
                 IReadOnlyList<string> wanted;
                 try { wanted = effect.Requires; }
                 catch { wanted = []; }
@@ -333,9 +337,9 @@ public sealed class PluginHost : IDisposable
     /// Loads the DLLs of a folder and returns the plugin classes in them.
     ///
     /// Each folder gets a load context of its own, so two plugins can carry different
-    /// versions of the same library. The contract assembly is the exception: it has to be
-    /// the program's own copy, or the plugin's classes implement an interface the program
-    /// does not know.
+    /// versions of the same library; the same version is shared between them. The contract
+    /// assembly is the exception: it has to be the program's own copy, or the plugin's
+    /// classes implement an interface the program does not know.
     /// </summary>
     static List<Type> FindTypes(string folder)
     {
@@ -347,7 +351,7 @@ public sealed class PluginHost : IDisposable
             if (string.Equals(Path.GetFileNameWithoutExtension(dll), FolderContext.Contract, StringComparison.OrdinalIgnoreCase)) continue;
 
             Assembly assembly;
-            try { assembly = context.LoadFromAssemblyPath(dll); }
+            try { assembly = context.LoadShared(dll); }
             catch (BadImageFormatException) { continue; }   // не сборка .NET, а родная библиотека
 
             Type[] exported;
@@ -366,13 +370,44 @@ public sealed class PluginHost : IDisposable
     {
         public static readonly string Contract = typeof(ILightPlugin).Assembly.GetName().Name!;
 
+        /// <summary>
+        /// Libraries already loaded by some folder, by full name: name, version and key.
+        ///
+        /// A library that two folders carry in the same version is loaded once and shared.
+        /// Two copies of NAudio, one in the keyboard's audio effect and one in the equalizer
+        /// for fixtures, crashed the program as soon as the second one started: Windows hands
+        /// out the same device enumerator to both, and the runtime keeps one wrapper per COM
+        /// object, typed by the copy that asked first, which the other copy cannot cast.
+        /// Different versions still get a copy per folder.
+        /// </summary>
+        static readonly Dictionary<string, Assembly> Shared = new(StringComparer.OrdinalIgnoreCase);
+
         protected override Assembly? Load(AssemblyName name)
         {
             // null отдаёт поиск основному контексту: там контракт и сама платформа
             if (name.Name == Contract) return null;
 
             string path = Path.Combine(folder, name.Name + ".dll");
-            return File.Exists(path) ? LoadFromAssemblyPath(path) : null;
+            if (!File.Exists(path)) return null;
+
+            try { return LoadShared(path); }
+            catch (BadImageFormatException) { return null; }   // не сборка .NET
+        }
+
+        /// <summary>A DLL of the folder, or the copy of it another folder has already loaded.</summary>
+        /// <exception cref="BadImageFormatException">The file is not a .NET assembly.</exception>
+        public Assembly LoadShared(string path)
+        {
+            string fullName = AssemblyName.GetAssemblyName(path).FullName;
+
+            lock (Shared)
+            {
+                if (Shared.TryGetValue(fullName, out var loaded)) return loaded;
+
+                var assembly = LoadFromAssemblyPath(path);
+                Shared[fullName] = assembly;
+                return assembly;
+            }
         }
 
         protected override IntPtr LoadUnmanagedDll(string unmanagedDllName)

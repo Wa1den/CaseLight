@@ -1,0 +1,34 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Плагин-эффект CaseLight: спектр звука на фигурах плана, на любых устройствах. Кладётся
+       папкой в plugins рядом с программой или с настройками:
+       dotnet publish plugins/Equalizer -c Release -o dist/plugins/Equalizer -->
+  <PropertyGroup>
+    <TargetFramework>net9.0-windows10.0.22621.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <Platforms>x64</Platforms>
+    <PlatformTarget>x64</PlatformTarget>
+    <RootNamespace>CaseLight.Equalizer</RootNamespace>
+    <AssemblyName>CaseLight.Equalizer</AssemblyName>
+    <Version>1.0.0</Version>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Звук снимается так же, как у шкалы громкости. -->
+    <Compile Include="..\Audio\AudioSource.cs" Link="Shared\AudioSource.cs" />
+
+    <PackageReference Include="NAudio.Wasapi" Version="2.2.1" />
+
+    <!-- Контракт берётся у программы во время работы: копия рядом с плагином дала бы
+         второй экземпляр интерфейса, который программа не узнает. -->
+    <ProjectReference Include="..\..\src\CaseLight.Plugins\CaseLight.Plugins.csproj" Private="false" />
+  </ItemGroup>
+
+  <!-- Проекция WinRT (сеансы мультимедиа Windows) тоже берётся у программы: она собрана под
+       тот же SDK, а вторая копия WinRT.Runtime в одном процессе с первой не уживается. -->
+  <Target Name="UseHostWinRT" AfterTargets="Build;Publish">
+    <Delete Files="$(OutDir)WinRT.Runtime.dll;$(OutDir)Microsoft.Windows.SDK.NET.dll;$(PublishDir)WinRT.Runtime.dll;$(PublishDir)Microsoft.Windows.SDK.NET.dll" />
+  </Target>
+
+</Project>

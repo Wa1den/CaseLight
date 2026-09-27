@@ -2,7 +2,7 @@ using System;
 using System.Threading;
 using Windows.Media.Control;
 
-namespace CaseLight.Audio;
+namespace CaseLight.Equalizer;
 
 /// <summary>
 /// Whether something plays media: a player, a browser tab, a streaming app - whatever shows
