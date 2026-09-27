@@ -258,17 +258,17 @@ effect is made for; empty means any.
 Ready effects are in [prebuilt/plugins](prebuilt/plugins), the sources in
 [plugins](plugins):
 
-* **Keyboard volume & equalizer** ([plugins/Audio](plugins/Audio)). The volume of the default
-  output device is shown as a bar along the rows chosen after every change, in another
-  colour when muted. The spectrum of what that device plays is shown as columns across the
-  keyboard; the height of a column is the number of rows chosen. The sound is captured
-  through WASAPI loopback, and only while the spectrum is shown. The spectrum can be limited
-  to the time a player or a browser plays something: the same sessions Windows shows in the
-  media panel next to the volume.
-* **Equalizer** ([plugins/Equalizer](plugins/Equalizer)). The same spectrum on the
-  fixtures of the plan chosen. The columns are laid over the rectangle the fixtures take up
-  on the canvas, one for all of them or one each: three fans in a row show one wide
-  spectrum or a spectrum each. For strips there is the overall level along the long side.
+* **Volume bar** ([plugins/Audio](plugins/Audio)). The volume of the default output device
+  is shown as a bar along the rows of the keyboard chosen after every change, in another
+  colour when muted.
+* **Equalizer** ([plugins/Equalizer](plugins/Equalizer)). The spectrum of what the default
+  output device plays, on the fixtures of the plan chosen, the keyboard included. The
+  columns are laid over the rectangle the fixtures take up on the canvas, one for all of
+  them or one each: three fans in a row show one wide spectrum or a spectrum each. For
+  strips there is the overall level along the long side. The sound is captured through
+  WASAPI loopback, and only while the spectrum is shown. The spectrum can be limited to the
+  time a player or a browser plays something: the same sessions Windows shows in the media
+  panel next to the volume.
 * **Caps Lock** ([plugins/CapsLock](plugins/CapsLock)). Lights the LED chosen by number
   while Caps Lock is on. Editing the number lights the LED for 2 s, which makes it easier
   to find.

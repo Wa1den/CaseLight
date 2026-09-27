@@ -15,10 +15,8 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <!-- Звук, спектр и сеансы мультимедиа те же, что у плагина клавиатуры. -->
+    <!-- Звук снимается так же, как у шкалы громкости. -->
     <Compile Include="..\Audio\AudioSource.cs" Link="Shared\AudioSource.cs" />
-    <Compile Include="..\Audio\Spectrum.cs" Link="Shared\Spectrum.cs" />
-    <Compile Include="..\Audio\MediaWatch.cs" Link="Shared\MediaWatch.cs" />
 
     <PackageReference Include="NAudio.Wasapi" Version="2.2.1" />
 
