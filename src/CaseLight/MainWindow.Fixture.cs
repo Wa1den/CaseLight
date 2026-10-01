@@ -446,22 +446,19 @@ public sealed partial class MainWindow
             v => { f.Saturation = v; TunedColour(f); }, enabled: on));
         p.Children.Add(Ui.Slider(Loc.T("color.gamma"), on ? f.Gamma : scene.Gamma, 0.5, 4, 0.05,
             v => { f.Gamma = v; TunedColour(f); }, enabled: on));
-        p.Children.Add(Ui.Slider(Loc.T("color.temperature"), on ? f.TemperatureK : scene.TemperatureK, 1500, 15000, 100,
-            v => { f.TemperatureK = (int)v; TunedColour(f); }, " K", enabled: on));
-
-        p.Children.Add(Ui.Header(Loc.T("color.gains"), Loc.T("color.gains.note")));
-        p.Children.Add(Ui.Slider(Loc.T("color.red"), on ? f.GainR : scene.GainR, 0, 2, 0.01,
-            v => { f.GainR = v; TunedColour(f); }, enabled: on));
-        p.Children.Add(Ui.Slider(Loc.T("color.green"), on ? f.GainG : scene.GainG, 0, 2, 0.01,
-            v => { f.GainG = v; TunedColour(f); }, enabled: on));
-        p.Children.Add(Ui.Slider(Loc.T("color.blue"), on ? f.GainB : scene.GainB, 0, 2, 0.01,
-            v => { f.GainB = v; TunedColour(f); }, enabled: on));
+        ICalibrated shown = on ? f : scene;
+        BuildBalance(p, shown, on, () => TunedColour(f));
 
         p.Children.Add(Ui.Header(Loc.T("color.smoothing"), Loc.T("color.smoothing.note")));
         p.Children.Add(Ui.Slider(Loc.T("color.rise"), on ? f.SmoothingRise : scene.SmoothingRise, 0.01, 1, 0.01,
             v => { f.SmoothingRise = v; TunedColour(f); }, enabled: on));
         p.Children.Add(Ui.Slider(Loc.T("color.fall"), on ? f.SmoothingFall : scene.SmoothingFall, 0.01, 1, 0.01,
             v => { f.SmoothingFall = v; TunedColour(f); }, enabled: on));
+
+        // Калибровка в конце вкладки: тестовые цвета включаются в её разделе слева, а
+        // ползунки здесь подбирают цвета этой фигуры.
+        p.Children.Add(Ui.Header(Loc.T("tab.calibration"), Loc.T("calib.fixture.note")));
+        BuildCalibration(p, shown, on, () => TunedColour(f), BuildFixturePanel);
     }
 
     /// <summary>The brightness settings of one fixture - see <see cref="BuildFixtureColour"/>.</summary>
@@ -488,6 +485,10 @@ public sealed partial class MainWindow
 
         p.Children.Add(Ui.Slider(Loc.T("color.brightness"), on ? f.Brightness : scene.Brightness, 0, 1, 0.01,
             v => { f.Brightness = v; TunedBrightness(f); }, "", Loc.T("color.brightness.note"), enabled: on));
+
+        p.Children.Add(Ui.Slider(Loc.T("color.boost"), on ? f.Boost : scene.Boost, 1, 5, 0.1,
+            v => { f.Boost = v; TunedBrightness(f); }, "", Loc.T("color.boost.note"),
+            format: DescribeBoost, enabled: on));
 
         p.Children.Add(Ui.Slider(Loc.T("color.minluma"), Math.Pow(minLuma / 0.3, 1.0 / 3.0), 0, 1, 0.005,
             v => { f.MinLuma = Math.Pow(v, 3) * 0.3; TunedBrightness(f); }, "",
@@ -553,11 +554,13 @@ public sealed partial class MainWindow
         f.GainB = _scene.GainB;
         f.SmoothingRise = _scene.SmoothingRise;
         f.SmoothingFall = _scene.SmoothingFall;
+        ColourCalibration.Copy(_scene, f);
     }
 
     void TakeSceneBrightness(Fixture f)
     {
         f.Brightness = _scene.Brightness;
+        f.Boost = _scene.Boost;
         f.MinLuma = _scene.MinLuma;
         f.ShadowNeutral = _scene.ShadowNeutral;
         f.MinBacklight = _scene.MinBacklight;
@@ -649,6 +652,10 @@ public sealed partial class MainWindow
             v => { _scene.Brightness = v; Touch(); }, "",
             Loc.T("color.brightness.note")));
 
+        panel.Children.Add(Ui.Slider(Loc.T("color.boost"), _scene.Boost, 1, 5, 0.1,
+            v => { _scene.Boost = v; Touch(); }, "",
+            Loc.T("color.boost.note"), format: DescribeBoost));
+
         // Кубическая шкала: рабочие значения лежат около 0,003, и на линейной шкале весь ход
         // уходит на ту часть диапазона, где подсветка просто гаснет.
         panel.Children.Add(Ui.Slider(Loc.T("color.minluma"), Math.Pow(_scene.MinLuma / 0.3, 1.0 / 3.0), 0, 1, 0.005,
@@ -675,13 +682,7 @@ public sealed partial class MainWindow
         panel.Children.Add(Ui.Header(Loc.T("color.head")));
         panel.Children.Add(Ui.Slider(Loc.T("color.saturation"), _scene.Saturation, 0, 3, 0.05, v => { _scene.Saturation = v; Touch(); }));
         panel.Children.Add(Ui.Slider(Loc.T("color.gamma"), _scene.Gamma, 0.5, 4, 0.05, v => { _scene.Gamma = v; Touch(); }));
-        panel.Children.Add(Ui.Slider(Loc.T("color.temperature"), _scene.TemperatureK, 1500, 15000, 100, v => { _scene.TemperatureK = (int)v; Touch(); }, " K"));
-
-        panel.Children.Add(Ui.Header(Loc.T("color.gains"),
-            Loc.T("color.gains.note")));
-        panel.Children.Add(Ui.Slider(Loc.T("color.red"), _scene.GainR, 0, 2, 0.01, v => { _scene.GainR = v; Touch(); }));
-        panel.Children.Add(Ui.Slider(Loc.T("color.green"), _scene.GainG, 0, 2, 0.01, v => { _scene.GainG = v; Touch(); }));
-        panel.Children.Add(Ui.Slider(Loc.T("color.blue"), _scene.GainB, 0, 2, 0.01, v => { _scene.GainB = v; Touch(); }));
+        BuildBalance(panel, _scene, editable: true, Touch);
 
         panel.Children.Add(Ui.Header(Loc.T("color.smoothing"),
             Loc.T("color.smoothing.note")));
@@ -772,6 +773,9 @@ public sealed partial class MainWindow
         : scale <= -1.05 ? string.Format(Loc.T("fixture.wider"), (-scale).ToString("0.#", CultureInfo.InvariantCulture))
         : Loc.T("fixture.square");
 
+    static string DescribeBoost(double v) =>
+        v <= 1.0 ? Loc.T("off") : "×" + v.ToString("0.0", CultureInfo.InvariantCulture);
+
     static Color ParseColor(string hex)
     {
         try { return (Color)ColorConverter.ConvertFromString(hex); }
@@ -809,6 +813,7 @@ public sealed partial class MainWindow
 
     void StartTest()
     {
+        HidePatch();
         EnsureServer();
         if (!_hub.Connect()) { Say(_hub.Status); return; }
 

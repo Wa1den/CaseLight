@@ -62,7 +62,7 @@ public sealed class Binding
 /// each individual LED sits inside it. The two are kept apart because the same 68-LED ring
 /// means completely different things lying flat and standing edge-on.
 /// </summary>
-public sealed class Fixture
+public sealed class Fixture : ICalibrated
 {
     public string Id { get; set; } = Guid.NewGuid().ToString("N")[..8];
     public string Name { get; set; } = Loc.P("Новая фигура", "New fixture");
@@ -178,6 +178,23 @@ public sealed class Fixture
     public double SmoothingRise { get; set; } = 0.9;
     public double SmoothingFall { get; set; } = 0.9;
 
+    /// <summary>
+    /// The colour calibration of the scene, held per fixture with the rest of the colour.
+    ///
+    /// Worth more here than anywhere else: the LEDs on a board, a fan and a memory module
+    /// are not the same parts, and a primary matched on one is off on the next.
+    /// </summary>
+    public bool Calibration { get; set; }
+    public double CalWhiteR { get; set; } = 1.0;
+    public double CalWhiteG { get; set; } = 1.0;
+    public double CalWhiteB { get; set; } = 1.0;
+    public double CalHueR { get; set; }
+    public double CalHueG { get; set; }
+    public double CalHueB { get; set; }
+    public double CalSatR { get; set; } = 1.0;
+    public double CalSatG { get; set; } = 1.0;
+    public double CalSatB { get; set; } = 1.0;
+
     /// <summary>Same for the brightness settings - see <see cref="ColorOverride"/>.</summary>
     public bool BrightnessOverride { get; set; }
 
@@ -185,6 +202,7 @@ public sealed class Fixture
     public bool BrightnessTuned { get; set; }
 
     public double Brightness { get; set; } = 1.0;
+    public double Boost { get; set; } = 1.0;
     public double MinLuma { get; set; }
     public double ShadowNeutral { get; set; }
     public double MinBacklight { get; set; }
