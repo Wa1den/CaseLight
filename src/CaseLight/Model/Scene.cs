@@ -5,6 +5,7 @@ using System.Linq;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
+using CaseLight.Core.Leds;
 using CaseLight.Core.Text;
 using CaseLight.Render;
 
@@ -157,7 +158,7 @@ public sealed class MonitorPlacement
 /// One object, so "apply" and "cancel" have something whole to snapshot, and so export is
 /// a single file that restores the program exactly.
 /// </summary>
-public sealed class Scene
+public sealed class Scene : ICalibrated
 {
     // ---- раскладка --------------------------------------------------------
 
@@ -254,6 +255,9 @@ public sealed class Scene
     public int Sharpness { get; set; }
 
     public double Brightness { get; set; } = 1.0;
+
+    /// <summary>Per-LED stretch towards full - see <see cref="ColorSettings.Boost"/>.</summary>
+    public double Boost { get; set; } = 1.0;
     public double Gamma { get; set; } = 1.0;
     public double Saturation { get; set; } = 1.0;
     public double MinLuma { get; set; }
@@ -284,6 +288,26 @@ public sealed class Scene
     public double GainR { get; set; } = 1.0;
     public double GainG { get; set; } = 1.0;
     public double GainB { get; set; } = 1.0;
+
+    /// <summary>
+    /// Colour calibration in place of the temperature and the gains - see
+    /// <see cref="ColorMatrix.FromPrimaries"/>. Off by default, and the values below are
+    /// kept while it is off, so switching it back on returns to the matched state.
+    /// </summary>
+    public bool Calibration { get; set; }
+
+    // белая точка калибровки: доля каждого канала на белом экране
+    public double CalWhiteR { get; set; } = 1.0;
+    public double CalWhiteG { get; set; } = 1.0;
+    public double CalWhiteB { get; set; } = 1.0;
+
+    // сдвиг каждого основного цвета к соседнему и его насыщенность
+    public double CalHueR { get; set; }
+    public double CalHueG { get; set; }
+    public double CalHueB { get; set; }
+    public double CalSatR { get; set; } = 1.0;
+    public double CalSatG { get; set; } = 1.0;
+    public double CalSatB { get; set; } = 1.0;
 
     public double SmoothingRise { get; set; } = 0.9;
     public double SmoothingFall { get; set; } = 0.9;

@@ -209,6 +209,7 @@ public sealed partial class MainWindow : Window
         _view.TestMoved += (_, _) => PushTestPatch();
 
         HookPower();
+        HookPatchKeys();
 
         Loaded += (_, _) =>
         {
@@ -268,6 +269,7 @@ public sealed partial class MainWindow : Window
             }
 
             SaveWindowGeometry();
+            HidePatch();
 
             // Порядок важен: пока поток раскраски жив, его очередной кадр уходит следом за
             // гашением и корпус остаётся светиться. Само гашение здесь, а не в Stop, потому
@@ -669,6 +671,7 @@ public sealed partial class MainWindow : Window
         BuildCropSection();
         BuildBrightnessSection();
         BuildColorsSection();
+        BuildCalibrationSection();
         BuildTestSection();
         BuildPowerSection();
         BuildAboutSection();
@@ -2261,6 +2264,7 @@ public sealed partial class MainWindow : Window
     void StopPainting()
     {
         _paintingWanted = false;
+        HidePatch();
         StopTest();
         _painter.Stop();
         UpdateStartButton();

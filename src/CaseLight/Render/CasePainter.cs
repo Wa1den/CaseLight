@@ -30,6 +30,25 @@ public sealed class TestPatch
 }
 
 /// <summary>
+/// One calibration test colour on every fixture at once, in place of the screen.
+///
+/// Handed to the LEDs directly rather than read off the colour shown on the screen: the
+/// fixtures sample wherever they stand, the settings window covers part of the screen,
+/// and a fixture sampling under it would get the colours of the window instead of the
+/// test colour.
+/// </summary>
+public sealed class ColourPatch
+{
+    public byte R, G, B;
+
+    /// <summary>
+    /// Brightness of the LEDs under the test colour, 0..1. One factor on all three channels
+    /// in linear light keeps their ratios, so a hue matched dimmed holds at full.
+    /// </summary>
+    public double Dim = 1.0;
+}
+
+/// <summary>
 /// Drives the case from the screen.
 ///
 /// The chain is deliberately the same one Rimlight already uses for the strip behind the
@@ -334,6 +353,14 @@ public sealed class CasePainter : IDisposable
 
     public bool TestActive => _test != null;
 
+    /// <summary>Reference assignment is atomic, like <see cref="_test"/>.</summary>
+    volatile ColourPatch? _colourPatch;
+
+    /// <summary>Null returns to painting from the screen. Takes precedence over the placement test.</summary>
+    public void SetColourPatch(ColourPatch? patch) => _colourPatch = patch;
+
+    public bool ColourPatchActive => _colourPatch != null;
+
     public void Start()
     {
         if (_running) return;
@@ -590,8 +617,14 @@ public sealed class CasePainter : IDisposable
             // Нового кадра экрана нет, но эффектам на фигурах нужен свой темп: тогда кадр
             // собирается из прежних цветов экрана.
             var test = _test;
+            var patch = _colourPatch;
             bool screenFrame = true;
-            if (test != null)
+            if (patch != null)
+            {
+                FillSolid(patch);
+                SourceInfo = Loc.P("тестовый цвет", "test colour");
+            }
+            else if (test != null)
             {
                 FillFromTest(test);
                 SourceInfo = Loc.P("тестовое пятно", "test patch");
@@ -628,11 +661,12 @@ public sealed class CasePainter : IDisposable
             // Такт цикла выжидается уже без замка, чтобы пауза не ждала целый период.
             lock (_sendGate)
             {
-                ProcessColour(dt <= 0 ? periodMs : dt);
+                ProcessColour(dt <= 0 ? periodMs : dt, patch);
 
                 // Эффекты рисуют поверх готовых цветов; кадр без нового экрана и без эффектов
-                // ничем не отличается от уже отправленного.
-                bool drew = _hub.Effects?.PaintFixtures(_runs, _output) ?? false;
+                // ничем не отличается от уже отправленного. Под тестовым цветом их нет:
+                // сравнивать нужно цвет, а не эффект поверх него.
+                bool drew = patch == null && (_hub.Effects?.PaintFixtures(_runs, _output) ?? false);
                 bool changed = screenFrame || drew || _effectsDrew;
                 _effectsDrew = drew;
                 _lastPaintMs = _effectClock.Elapsed.TotalMilliseconds;
@@ -661,7 +695,9 @@ public sealed class CasePainter : IDisposable
                 Fps = framesThisSecond * 1000.0 / (tick - fpsWindow);
                 framesThisSecond = 0;
                 fpsWindow = tick;
-                Status = (test != null ? Loc.P("тест размещения, ", "placement test, ") : Loc.P("идёт раскраска, ", "painting, ")) + Rate(Fps);
+                Status = (patch != null ? Loc.P("тестовый цвет, ", "test colour, ")
+                          : test != null ? Loc.P("тест размещения, ", "placement test, ")
+                          : Loc.P("идёт раскраска, ", "painting, ")) + Rate(Fps);
 
                 // раскраска идёт на плагинах, а часть фигур ждёт сервер
                 if (!serverUp && _hasServerTargets) Status += "; " + _hub.Status;
@@ -1045,6 +1081,17 @@ public sealed class CasePainter : IDisposable
         }
     }
 
+    /// <summary>Every LED gets the test colour, as a screen filled with it would give.</summary>
+    void FillSolid(ColourPatch patch)
+    {
+        for (int o = 0; o + 2 < _sampled.Length; o += 3)
+        {
+            _sampled[o] = patch.R;
+            _sampled[o + 1] = patch.G;
+            _sampled[o + 2] = patch.B;
+        }
+    }
+
     static bool Inside(TestPatch patch, Point p)
     {
         double half = patch.SizeMm / 2;
@@ -1100,8 +1147,12 @@ public sealed class CasePainter : IDisposable
     ///
     /// One call per fixture rather than one for the whole frame, because the settings a
     /// fixture is painted by may be its own and the pipeline takes one set per call.
+    ///
+    /// Under a test colour the darkness cutoff, the backlight floor and the shadow fade are
+    /// suspended: they act by level, and on a dimmed primary the floor alone lights the two
+    /// channels that should be off.
     /// </summary>
-    void ProcessColour(double dtMs)
+    void ProcessColour(double dtMs, ColourPatch? patch)
     {
         foreach (var g in _groups)
         {
@@ -1114,9 +1165,17 @@ public sealed class CasePainter : IDisposable
                 continue;
             }
 
+            var settings = g.Settings;
+            double shadow = g.ShadowNeutral;
+            if (patch != null)
+            {
+                settings = settings with { MaxBrightness = settings.MaxBrightness * patch.Dim, MinLuma = 0, MinBacklight = 0 };
+                shadow = 0;
+            }
+
             Array.Copy(_sampled, g.Start * 3, g.In, 0, bytes);
-            g.Pipe.Process(g.In, g.Out, g.Settings, g.Count, dtMs);
-            NeutraliseShadows(g.Out, g.ShadowNeutral);
+            g.Pipe.Process(g.In, g.Out, settings, g.Count, dtMs);
+            NeutraliseShadows(g.Out, shadow);
             Array.Copy(g.Out, 0, _output, g.Start * 3, bytes);
         }
     }
@@ -1154,6 +1213,7 @@ public sealed class CasePainter : IDisposable
     ColorSettings ColourSettingsFor(Fixture f) => new()
     {
         MaxBrightness = f.BrightnessOverride ? f.Brightness : _scene.Brightness,
+        Boost = f.BrightnessOverride ? f.Boost : _scene.Boost,
         MinLuma = f.BrightnessOverride ? f.MinLuma : _scene.MinLuma,
         MinBacklight = f.BrightnessOverride ? f.MinBacklight : _scene.MinBacklight,
 
@@ -1163,6 +1223,7 @@ public sealed class CasePainter : IDisposable
         GainR = f.ColorOverride ? f.GainR : _scene.GainR,
         GainG = f.ColorOverride ? f.GainG : _scene.GainG,
         GainB = f.ColorOverride ? f.GainB : _scene.GainB,
+        Calibration = f.ColorOverride ? ColourCalibration.Of(f) : ColourCalibration.Of(_scene),
         SmoothingRise = f.ColorOverride ? f.SmoothingRise : _scene.SmoothingRise,
         SmoothingFall = f.ColorOverride ? f.SmoothingFall : _scene.SmoothingFall,
 

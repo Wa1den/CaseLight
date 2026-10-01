@@ -153,6 +153,8 @@ The layout, the settings and the log are kept in `%AppData%\CaseLight\`. The ent
 of the program is stored in `config.json`, and moving it to another machine is a matter of
 exporting and importing that file. Versions before 1.5.0 kept the settings in `scene.json`;
 on the first run they are copied under the new name and the old file is left in place.
+Once the log reaches 5 MB it is renamed to `caselight.old.log` and a new one is started, so
+it never takes more than 10 MB.
 
 ## Localisation
 
