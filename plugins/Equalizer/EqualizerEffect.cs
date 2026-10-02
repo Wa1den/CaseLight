@@ -30,10 +30,10 @@ public sealed class EqualizerEffect : ILightEffect
     readonly MediaWatch _media = new();
 
     // настройки: пишутся в Configure, читаются в Paint, одно с другим не пересекается
-    bool _mediaOnly, _eachOwn;
+    bool _mediaOnly, _eachOwn, _cycle;
     int _direction, _bands, _under;
     LightColor _low, _high;
-    double _brightness, _gainDb, _rangeDb, _fallSeconds;
+    double _brightness, _gainDb, _rangeDb, _fallSeconds, _cycleSeconds;
 
     double[] _target = [], _shown = [];
     double _lastSeconds;
@@ -87,6 +87,17 @@ public sealed class EqualizerEffect : ILightEffect
         },
         new("eq.low", SettingKind.Color, T("Цвет в начале шкалы", "Colour at the start of the scale")) { Default = "#00E060" },
         new("eq.high", SettingKind.Color, T("Цвет в конце шкалы", "Colour at the end of the scale")) { Default = "#FF3000" },
+        new("eq.cycle", SettingKind.Toggle, T("Циклическая смена цветов", "Cycle the colours"))
+        {
+            Help = T("Оба цвета шкалы вместе проходят по кругу оттенков и через период возвращаются к выбранным. Разница между ними по оттенку, насыщенность и яркость остаются прежними.",
+                     "Both colours of the scale go round the colour wheel together and come back to the ones chosen after a period. The difference in hue between them, their saturation and brightness stay as they are.")
+        },
+        new("eq.cycle.period", SettingKind.Slider, T("Период смены цветов", "Colour cycle period"))
+        {
+            Default = "30", Min = 5, Max = 300, Step = 5, Unit = T(" с", " s"),
+            Help = T("За сколько цвета проходят полный круг оттенков. Действует при включённой циклической смене.",
+                     "How long the colours take to go the whole way round the colour wheel. Takes effect with the colours cycling.")
+        },
         new("eq.under", SettingKind.Choice, T("Под спектром", "Under the spectrum"))
         {
             Default = "1",
@@ -128,6 +139,8 @@ public sealed class EqualizerEffect : ILightEffect
         _bands = Math.Clamp(values.Int("eq.bands"), 1, 64);
         _low = values.Color("eq.low");
         _high = values.Color("eq.high");
+        _cycle = values.Bool("eq.cycle");
+        _cycleSeconds = Math.Max(1, values.Number("eq.cycle.period"));
         _under = values.Int("eq.under");
         _brightness = Math.Clamp(values.Number("eq.brightness") / 100, 0, 1);
         _gainDb = values.Number("eq.gain");
@@ -150,10 +163,17 @@ public sealed class EqualizerEffect : ILightEffect
 
         double overall = _shown.Max();
 
+        var (low, high) = (_low, _high);
+        if (_cycle)
+        {
+            double turn = canvas.Seconds / _cycleSeconds % 1 * 360;
+            (low, high) = (Rotate(low, turn), Rotate(high, turn));
+        }
+
         if (_eachOwn)
-            foreach (var part in canvas.Parts) PaintArea(canvas, layout, part, overall);
+            foreach (var part in canvas.Parts) PaintArea(canvas, layout, part, overall, low, high);
         else
-            PaintArea(canvas, layout, Enumerable.Range(0, canvas.LedCount).ToArray(), overall);
+            PaintArea(canvas, layout, Enumerable.Range(0, canvas.LedCount).ToArray(), overall, low, high);
 
         return true;
     }
@@ -186,7 +206,7 @@ public sealed class EqualizerEffect : ILightEffect
     }
 
     /// <summary>Lays the spectrum over one area: the rectangle the areas of these LEDs take up on the plan.</summary>
-    void PaintArea(EffectCanvas canvas, IReadOnlyList<LedRect> layout, int[] leds, double overall)
+    void PaintArea(EffectCanvas canvas, IReadOnlyList<LedRect> layout, int[] leds, double overall, LightColor low, LightColor high)
     {
         if (leds.Length == 0) return;
 
@@ -223,7 +243,7 @@ public sealed class EqualizerEffect : ILightEffect
                 : _shown[Math.Clamp((int)(across * _bands), 0, _bands - 1)];
 
             double lit = to - from > 1e-9 ? Math.Clamp((level - from) / (to - from), 0, 1) : level > from ? 1 : 0;
-            var colour = Blend(_low, _high, (from + to) / 2).Scale(_brightness);
+            var colour = Blend(low, high, (from + to) / 2).Scale(_brightness);
 
             var under = _under switch
             {
@@ -259,6 +279,33 @@ public sealed class EqualizerEffect : ILightEffect
         }
 
         return new LightColor(Channel(from.R, to.R, t), Channel(from.G, to.G, t), Channel(from.B, to.B, t));
+    }
+
+    /// <summary>The colour turned by <paramref name="degrees"/> round the hue circle, its saturation and value kept.</summary>
+    static LightColor Rotate(LightColor c, double degrees)
+    {
+        double r = c.R / 255.0, g = c.G / 255.0, b = c.B / 255.0;
+        double max = Math.Max(r, Math.Max(g, b)), min = Math.Min(r, Math.Min(g, b)), chroma = max - min;
+        if (chroma <= 0) return c;
+
+        double hue = max == r ? (g - b) / chroma
+                   : max == g ? (b - r) / chroma + 2
+                   : (r - g) / chroma + 4;
+        hue = ((hue * 60 + degrees) % 360 + 360) % 360 / 60;
+
+        double x = chroma * (1 - Math.Abs(hue % 2 - 1));
+        var (r1, g1, b1) = (int)hue switch
+        {
+            0 => (chroma, x, 0.0),
+            1 => (x, chroma, 0.0),
+            2 => (0.0, chroma, x),
+            3 => (0.0, x, chroma),
+            4 => (x, 0.0, chroma),
+            _ => (chroma, 0.0, x)
+        };
+
+        static byte Byte(double v) => (byte)Math.Round(Math.Clamp(v, 0, 1) * 255);
+        return new LightColor(Byte(r1 + min), Byte(g1 + min), Byte(b1 + min));
     }
 
     public void Dispose()
