@@ -127,7 +127,7 @@ public sealed class EqualizerEffect : ILightEffect
         },
         new("eq.cycle.period", SettingKind.Slider, T("Период смены цветов", "Colour cycle period"))
         {
-            Default = "30", Min = 5, Max = 300, Step = 5, Unit = T(" с", " s"),
+            Default = "10", Min = 1, Max = 30, Step = 1, Unit = T(" с", " s"),
             Help = T("От выбранных цветов и в радуге — время полного круга оттенков, в динамической смене — время одной пары вместе с переходом к следующей.",
                      "From the colours chosen and in the rainbow, the time of the whole way round the colour wheel; in the dynamic cycle, the time of one pair along with the change to the next.")
         },
@@ -173,7 +173,7 @@ public sealed class EqualizerEffect : ILightEffect
         _low = values.Color("eq.low");
         _high = values.Color("eq.high");
         _cycle = Math.Clamp(values.Int("eq.cycle"), CycleNone, CycleDynamic);
-        _cycleSeconds = Math.Max(1, values.Number("eq.cycle.period"));
+        _cycleSeconds = Math.Clamp(values.Number("eq.cycle.period"), 1, 30);
         _under = values.Int("eq.under");
         _brightness = Math.Clamp(values.Number("eq.brightness") / 100, 0, 1);
         _gainDb = values.Number("eq.gain");
@@ -343,10 +343,18 @@ public sealed class EqualizerEffect : ILightEffect
         return new LightColor(Channel(from.R, to.R, t), Channel(from.G, to.G, t), Channel(from.B, to.B, t));
     }
 
-    /// <summary>The colour turned by <paramref name="degrees"/> round the hue circle, its saturation and value kept.</summary>
+    /// <summary>
+    /// The colour turned by <paramref name="degrees"/> round the hue circle, its saturation
+    /// and value kept.
+    ///
+    /// The circle is laid out after the exponent, as in <see cref="Blend"/>. Laid out by
+    /// bytes, ten degrees from red already gave blue a byte of 42, which the eye sees at
+    /// 44 % of full, and the red of the rainbow turned pink almost at once.
+    /// </summary>
     static LightColor Rotate(LightColor c, double degrees)
     {
-        double r = c.R / 255.0, g = c.G / 255.0, b = c.B / 255.0;
+        static double Eye(byte v) => Math.Pow(v / 255.0, 1 / Perceived);
+        double r = Eye(c.R), g = Eye(c.G), b = Eye(c.B);
         double max = Math.Max(r, Math.Max(g, b)), min = Math.Min(r, Math.Min(g, b)), chroma = max - min;
         if (chroma <= 0) return c;
 
@@ -366,7 +374,7 @@ public sealed class EqualizerEffect : ILightEffect
             _ => (chroma, 0.0, x)
         };
 
-        static byte Byte(double v) => (byte)Math.Round(Math.Clamp(v, 0, 1) * 255);
+        static byte Byte(double v) => (byte)Math.Round(Math.Pow(Math.Clamp(v, 0, 1), Perceived) * 255);
         return new LightColor(Byte(r1 + min), Byte(g1 + min), Byte(b1 + min));
     }
 
