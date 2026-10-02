@@ -31,12 +31,43 @@ public sealed class EqualizerEffect : ILightEffect
 
     // настройки: пишутся в Configure, читаются в Paint, одно с другим не пересекается
     bool _mediaOnly, _eachOwn;
-    int _direction, _bands, _under;
+    int _direction, _bands, _under, _cycle;
     LightColor _low, _high;
-    double _brightness, _gainDb, _rangeDb, _fallSeconds;
+    double _brightness, _gainDb, _rangeDb, _fallSeconds, _cycleSeconds;
 
     double[] _target = [], _shown = [];
     double _lastSeconds;
+
+    // цвета шкалы на текущий кадр: пишутся в начале Paint, читаются в ScaleColour
+    LightColor _frameLow, _frameHigh;
+    double _rainbowShift;
+
+    /// <summary>Values of the <c>eq.cycle</c> choice.</summary>
+    const int CycleNone = 0, CycleChosen = 1, CycleRainbow = 2, CycleDynamic = 3;
+
+    /// <summary>Share of the time of a pair in <see cref="CycleDynamic"/> that it holds before it starts turning into the next.</summary>
+    const double PairHold = 0.6;
+
+    /// <summary>
+    /// Pairs of the dynamic cycle, start and end of the scale, in the order they follow
+    /// each other.
+    ///
+    /// The ends of a pair are 60 to 135 degrees apart in hue, from neighbouring colours to
+    /// nearly a triad. Opposite colours would make a contrast at the ends, but the middle of
+    /// the scale between them passes near grey and looks dull on an LED. Every pair passes
+    /// through saturated hues on its way, and next pairs share a part of the circle, so the
+    /// change from one to the next does not go through white.
+    /// </summary>
+    static readonly (LightColor Low, LightColor High)[] Pairs =
+    [
+        (LightColor.Parse("#00FF60"), LightColor.Parse("#FF2000")),  // зелёный — красный через жёлтый, как у индикатора уровня
+        (LightColor.Parse("#FF0050"), LightColor.Parse("#FFB000")),  // малиновый — янтарный, соседние тёплые
+        (LightColor.Parse("#FFC000"), LightColor.Parse("#FF00A0")),  // золотой — пурпурный через красный
+        (LightColor.Parse("#8000FF"), LightColor.Parse("#FF3080")),  // фиолетовый — розовый, соседние
+        (LightColor.Parse("#00D0FF"), LightColor.Parse("#FF00C0")),  // голубой — пурпурный через синий, почти триада
+        (LightColor.Parse("#00FFA0"), LightColor.Parse("#2040FF")),  // аквамарин — синий, соседние холодные
+        (LightColor.Parse("#A0FF00"), LightColor.Parse("#00E0FF")),  // салатовый — бирюзовый через зелёный
+    ];
 
     static string T(string ru, string en) => PluginApi.Language == "ru" ? ru : en;
 
@@ -87,6 +118,19 @@ public sealed class EqualizerEffect : ILightEffect
         },
         new("eq.low", SettingKind.Color, T("Цвет в начале шкалы", "Colour at the start of the scale")) { Default = "#00E060" },
         new("eq.high", SettingKind.Color, T("Цвет в конце шкалы", "Colour at the end of the scale")) { Default = "#FF3000" },
+        new("eq.cycle", SettingKind.Choice, T("Смена цветов", "Colour cycle"))
+        {
+            Default = "0",
+            Options = [T("Нет", "None"), T("От выбранных цветов", "From the colours chosen"), T("Радуга", "Rainbow"), T("Динамическая", "Dynamic")],
+            Help = T("От выбранных цветов: оба цвета шкалы вместе проходят по кругу оттенков, разница между ними, насыщенность и яркость остаются прежними. Радуга: вдоль шкалы лежит весь круг оттенков и равномерно сдвигается по ней. Динамическая: шкала по очереди принимает пары сочетающихся цветов и плавно переходит от одной к другой. Выбранные цвета используются в первых двух вариантах.",
+                     "From the colours chosen: both colours of the scale go round the colour wheel together, keeping the difference between them, their saturation and brightness. Rainbow: the whole colour wheel lies along the scale and moves evenly along it. Dynamic: the scale takes pairs of matching colours in turn and passes smoothly from one to the next. The colours chosen are used in the first two.")
+        },
+        new("eq.cycle.period", SettingKind.Slider, T("Период смены цветов", "Colour cycle period"))
+        {
+            Default = "10", Min = 1, Max = 30, Step = 1, Unit = T(" с", " s"),
+            Help = T("От выбранных цветов и в радуге — время полного круга оттенков, в динамической смене — время одной пары вместе с переходом к следующей.",
+                     "From the colours chosen and in the rainbow, the time of the whole way round the colour wheel; in the dynamic cycle, the time of one pair along with the change to the next.")
+        },
         new("eq.under", SettingKind.Choice, T("Под спектром", "Under the spectrum"))
         {
             Default = "1",
@@ -128,6 +172,8 @@ public sealed class EqualizerEffect : ILightEffect
         _bands = Math.Clamp(values.Int("eq.bands"), 1, 64);
         _low = values.Color("eq.low");
         _high = values.Color("eq.high");
+        _cycle = Math.Clamp(values.Int("eq.cycle"), CycleNone, CycleDynamic);
+        _cycleSeconds = Math.Clamp(values.Number("eq.cycle.period"), 1, 30);
         _under = values.Int("eq.under");
         _brightness = Math.Clamp(values.Number("eq.brightness") / 100, 0, 1);
         _gainDb = values.Number("eq.gain");
@@ -149,6 +195,8 @@ public sealed class EqualizerEffect : ILightEffect
         if (!Measure(dt) || canvas.Layout is not { } layout) return false;
 
         double overall = _shown.Max();
+
+        PickColours(canvas.Seconds);
 
         if (_eachOwn)
             foreach (var part in canvas.Parts) PaintArea(canvas, layout, part, overall);
@@ -184,6 +232,40 @@ public sealed class EqualizerEffect : ILightEffect
         // Когда долго тихо, спектр не рисуется: подложка «Под спектром» гасила бы картинку и без него.
         return media && now - _source.LastSoundTicks < SilenceHoldMs || _shown.Any(v => v > 0.01);
     }
+
+    /// <summary>Sets the colours of the scale for the frame at <paramref name="seconds"/>.</summary>
+    void PickColours(double seconds)
+    {
+        double step = seconds / _cycleSeconds, turn = step % 1;
+        (_frameLow, _frameHigh) = (_low, _high);
+
+        switch (_cycle)
+        {
+            case CycleChosen:
+                (_frameLow, _frameHigh) = (Rotate(_low, turn * 360), Rotate(_high, turn * 360));
+                break;
+
+            case CycleRainbow:
+                _rainbowShift = turn * 360;
+                break;
+
+            case CycleDynamic:
+                int pair = (int)(step % Pairs.Length);
+                var (from, to) = (Pairs[pair], Pairs[(pair + 1) % Pairs.Length]);
+
+                // пара стоит PairHold своего времени, остальное время переходит в следующую
+                double t = Math.Clamp((turn - PairHold) / (1 - PairHold), 0, 1);
+                t = t * t * (3 - 2 * t);
+                (_frameLow, _frameHigh) = (Blend(from.Low, to.Low, t), Blend(from.High, to.High, t));
+                break;
+        }
+    }
+
+    /// <summary>The colour of the scale at <paramref name="t"/>, from its start at 0 to its end at 1.</summary>
+    LightColor ScaleColour(double t) =>
+        _cycle == CycleRainbow
+            ? Rotate(new LightColor(255, 0, 0), Math.Clamp(t, 0, 1) * 360 - _rainbowShift)
+            : Blend(_frameLow, _frameHigh, t);
 
     /// <summary>Lays the spectrum over one area: the rectangle the areas of these LEDs take up on the plan.</summary>
     void PaintArea(EffectCanvas canvas, IReadOnlyList<LedRect> layout, int[] leds, double overall)
@@ -223,7 +305,7 @@ public sealed class EqualizerEffect : ILightEffect
                 : _shown[Math.Clamp((int)(across * _bands), 0, _bands - 1)];
 
             double lit = to - from > 1e-9 ? Math.Clamp((level - from) / (to - from), 0, 1) : level > from ? 1 : 0;
-            var colour = Blend(_low, _high, (from + to) / 2).Scale(_brightness);
+            var colour = ScaleColour((from + to) / 2).Scale(_brightness);
 
             var under = _under switch
             {
@@ -259,6 +341,41 @@ public sealed class EqualizerEffect : ILightEffect
         }
 
         return new LightColor(Channel(from.R, to.R, t), Channel(from.G, to.G, t), Channel(from.B, to.B, t));
+    }
+
+    /// <summary>
+    /// The colour turned by <paramref name="degrees"/> round the hue circle, its saturation
+    /// and value kept.
+    ///
+    /// The circle is laid out after the exponent, as in <see cref="Blend"/>. Laid out by
+    /// bytes, ten degrees from red already gave blue a byte of 42, which the eye sees at
+    /// 44 % of full, and the red of the rainbow turned pink almost at once.
+    /// </summary>
+    static LightColor Rotate(LightColor c, double degrees)
+    {
+        static double Eye(byte v) => Math.Pow(v / 255.0, 1 / Perceived);
+        double r = Eye(c.R), g = Eye(c.G), b = Eye(c.B);
+        double max = Math.Max(r, Math.Max(g, b)), min = Math.Min(r, Math.Min(g, b)), chroma = max - min;
+        if (chroma <= 0) return c;
+
+        double hue = max == r ? (g - b) / chroma
+                   : max == g ? (b - r) / chroma + 2
+                   : (r - g) / chroma + 4;
+        hue = ((hue * 60 + degrees) % 360 + 360) % 360 / 60;
+
+        double x = chroma * (1 - Math.Abs(hue % 2 - 1));
+        var (r1, g1, b1) = (int)hue switch
+        {
+            0 => (chroma, x, 0.0),
+            1 => (x, chroma, 0.0),
+            2 => (0.0, chroma, x),
+            3 => (0.0, x, chroma),
+            4 => (x, 0.0, chroma),
+            _ => (chroma, 0.0, x)
+        };
+
+        static byte Byte(double v) => (byte)Math.Round(Math.Pow(Math.Clamp(v, 0, 1), Perceived) * 255);
+        return new LightColor(Byte(r1 + min), Byte(g1 + min), Byte(b1 + min));
     }
 
     public void Dispose()
