@@ -229,6 +229,17 @@ straight into the same place:
 dotnet publish plugins/NuPhy -c Release -o "%AppData%\CaseLight\plugins\NuPhy"
 ```
 
+The plugin [plugins/GyverLamp](plugins/GyverLamp) shows frames on the matrix of a desk lamp
+running the [GyverLamp-Wa1den](https://github.com/Wa1den/GyverLamp-Wa1den) firmware 4.2.0 or
+newer, over the local network with DDP on UDP port 4048. Once receiving frames is switched on
+in the network section of the lamp's page and the effect «Кадры с компьютера» (frames from a
+computer) is selected, the lamp shows up in the device list under its
+network name: the plugin broadcasts a query on every network of the computer every 3 seconds.
+The matrix is given as the unrolled cylinder for the matrix arrangement, its top row being the
+top of the lamp. The lamp goes dark when no frame comes for 2.5 s, so on a still screen the
+plugin repeats the frame every second. A ready build is in
+[prebuilt/plugins/GyverLamp](prebuilt/plugins/GyverLamp).
+
 ### Effects
 
 An effect is a plugin that draws over the picture from the screen: an indicator, a bar, a

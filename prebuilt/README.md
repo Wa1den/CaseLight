@@ -10,6 +10,7 @@
 | [plugins/Audio](plugins/Audio) | [plugins/Audio](../plugins/Audio) | 1.1.0, контракт 1, нужен CaseLight 1.12.0 |
 | [plugins/Equalizer](plugins/Equalizer) | [plugins/Equalizer](../plugins/Equalizer) | 1.1.0, контракт 1, нужен CaseLight 1.13.0 |
 | [plugins/CapsLock](plugins/CapsLock) | [plugins/CapsLock](../plugins/CapsLock) | 1.0.0, контракт 1, нужен CaseLight 1.12.0 |
+| [plugins/GyverLamp](plugins/GyverLamp) | [plugins/GyverLamp](../plugins/GyverLamp) | 1.0.0, контракт 1, нужна прошивка лампы GyverLamp-Wa1den 4.2.0 |
 
 Сборка пересобирается после любой правки исходников плагина или контракта той же командой:
 
