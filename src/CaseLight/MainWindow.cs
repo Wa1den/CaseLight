@@ -175,6 +175,11 @@ public sealed partial class MainWindow : Window
         try { Icon = BitmapFrame.Create(new Uri("pack://application:,,,/icon.ico")); }
         catch { /* без иконки окно всё равно работает */ }
 
+        // Реестр и есть настоящее состояние автозапуска. Читается до снимка применённых
+        // настроек, иначе окно сразу считало бы их изменёнными, и один раз, а не при каждой
+        // пересборке страниц: пересборка затёрла бы снятую, но ещё не применённую галку.
+        _scene.StartWithWindows = Autostart.IsEnabled();
+
         _saved = _scene.Clone();
         _painter = new CasePainter(_hub, _scene);
 
@@ -189,6 +194,17 @@ public sealed partial class MainWindow : Window
         _plugins.Apply(_scene.Plugins);
 
         RestoreWindowGeometry();
+
+        // Свёрнутым окно должно появиться сразу, до Show: свёрнутое в Loaded успевало секунду
+        // постоять пустой рамкой, пока Loaded подключался к серверу и собирал разделы. Окну,
+        // уходящему в трей, не нужна и кнопка на панели задач на это время.
+        if (_scene.StartMinimized)
+        {
+            WindowState = WindowState.Minimized;
+            ShowActivated = false;
+            if (_scene.MinimizeToTray) ShowInTaskbar = false;
+        }
+
         Content = BuildLayout();
         SetupChrome();
 
@@ -225,7 +241,6 @@ public sealed partial class MainWindow : Window
             SyncFixtureList();
             _view.FitToContent();
 
-            if (_scene.StartMinimized) WindowState = WindowState.Minimized;
             if (_scene.StartPaintingOnLaunch) StartPainting();
 
             // Подписка на питание экрана отдаёт его состояние сразу, блокировка сессии
@@ -235,6 +250,11 @@ public sealed partial class MainWindow : Window
 
             // Не ожидается: ответ может идти секунды, а подсветке это время нужнее.
             if (_scene.CheckUpdates) _ = AnnounceUpdateAsync();
+
+            // StateChanged на начальное состояние не приходит, поэтому в трей окно уводится
+            // здесь. Кнопка на панели задач возвращается: она нужна, когда окно откроют из трея.
+            if (WindowState == WindowState.Minimized && _scene.MinimizeToTray) Hide();
+            ShowInTaskbar = true;
         };
 
         StateChanged += (_, _) =>
@@ -772,8 +792,28 @@ public sealed partial class MainWindow : Window
         panel.Children.Add(Ui.Check(Loc.T("main.startmin"), _scene.StartMinimized, v => { _scene.StartMinimized = v; Touch(); }));
 
         panel.Children.Add(Ui.Header(Loc.T("main.startup")));
-        panel.Children.Add(Ui.Check(Loc.T("main.autostart"), Autostart.IsEnabled(), v => Say(Autostart.Set(v)),
-            Loc.T("main.autostart.note")));
+
+        // галка остаётся включённой, если запись ведёт на другую копию: автозапуск есть,
+        // просто не этот; снятие и повторная установка переводят его на эту копию
+        var otherCopy = Ui.Note("");
+        otherCopy.Margin = new Thickness(0, 0, 0, 6);
+        _refreshAutostart = ShowOtherCopy;
+        void ShowOtherCopy()
+        {
+            string? other = _scene.StartWithWindows ? Autostart.OtherCopy() : null;
+            otherCopy.Text = other == null ? "" : string.Format(Loc.T("main.autostart.other"), other);
+            otherCopy.Visibility = other == null ? Visibility.Collapsed : Visibility.Visible;
+        }
+
+        panel.Children.Add(Ui.Check(Loc.T("main.autostart"), _scene.StartWithWindows, v =>
+        {
+            _scene.StartWithWindows = v;      // в реестр уходит по «Применить»
+            ShowOtherCopy();
+            Touch();
+        }, Loc.T("main.autostart.note")));
+        panel.Children.Add(otherCopy);
+        ShowOtherCopy();
+
         panel.Children.Add(Ui.Check(Loc.T("main.autopaint"), _scene.StartPaintingOnLaunch, v => { _scene.StartPaintingOnLaunch = v; Touch(); }));
 
         panel.Children.Add(Ui.Header(Loc.T("main.settings"),
@@ -1321,8 +1361,27 @@ public sealed partial class MainWindow : Window
         _dirtyBar.Visibility = dirty ? Visibility.Visible : Visibility.Collapsed;
     }
 
+    /// <summary>Redraws the other-copy line under the autostart box; set by the page that owns it.</summary>
+    Action? _refreshAutostart;
+
+    /// <summary>
+    /// Writes the autostart flag to the Run entry on Apply, and only when it differs from what
+    /// is there. Unticking removes the entry whichever copy it points to; ticking writes this
+    /// copy's path.
+    ///
+    /// Written unconditionally, the entry would move onto whichever copy Apply was pressed
+    /// in - a build being tried out would take it over by saving an unrelated setting.
+    /// </summary>
+    void SyncAutostart()
+    {
+        if (_scene.StartWithWindows != Autostart.IsEnabled())
+            ProbeLog.Log(Loc.P("автозапуск", "autostart"), Autostart.Set(_scene.StartWithWindows));
+        _refreshAutostart?.Invoke();
+    }
+
     void ApplyChanges()
     {
+        SyncAutostart();
         _saved = _scene.Clone();
         _saved.Save();
         UpdateDirtyBar();
@@ -1374,6 +1433,9 @@ public sealed partial class MainWindow : Window
         {
             var loaded = Scene.Import(dialog.FileName);
             _scene.CopyFrom(loaded);
+
+            // автозапуск принадлежит этой машине и этой копии, а не файлу настроек
+            _scene.StartWithWindows = Autostart.IsEnabled();
             _plugins.Apply(_scene.Plugins);
 
             _view.Select(null);
@@ -1395,9 +1457,9 @@ public sealed partial class MainWindow : Window
     /// Puts every setting back to its standard value, leaving the layout alone.
     ///
     /// Applied live like any other edit rather than written straight to disk: a reset moves
-    /// several pages at once, and «Отмена» has to be able to take it back. What lives
-    /// outside the settings file goes with it - the autostart entry in the registry and the
-    /// scheduler task, both of which the standard values say are off.
+    /// several pages at once, and «Отмена» has to be able to take it back. The autostart box
+    /// goes off with the rest and reaches the registry on Apply like any other setting. The
+    /// scheduler task, which the standard values also say is off, is removed at once.
     /// </summary>
     void ResetSettings()
     {
@@ -1408,7 +1470,6 @@ public sealed partial class MainWindow : Window
         _scene.ResetToDefaults();
 
         ProbeLog.Configure(Scene.LogPath, _scene.WriteLog);
-        if (Autostart.IsEnabled()) Autostart.Set(false);
 
         // The task is «run as administrator» by another name, so it follows that setting
         // down exactly as it does when the checkbox is cleared by hand.

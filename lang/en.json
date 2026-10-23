@@ -56,6 +56,7 @@
   "main.startup": "Startup",
   "main.autostart": "Start with Windows",
   "main.autostart.note": "The lighting is driven by OpenRGB, so starting CaseLight automatically only makes sense together with starting OpenRGB.",
+  "main.autostart.other": "Another copy starts from: {0}",
   "main.autopaint": "Start painting at once",
   "openrgb.start": "Starting the server",
   "main.serverstart": "Start OpenRGB if it is not running",
@@ -294,5 +295,5 @@
   "unit.s": " s",
   "off": "off",
   "_name": "English",
-  "_version": "23"
+  "_version": "24"
 }

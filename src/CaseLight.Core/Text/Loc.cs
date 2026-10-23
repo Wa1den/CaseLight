@@ -20,7 +20,7 @@ public static class Loc
     /// silently shadowed newly reworded labels, so a mismatched version rewrites it. Only
     /// the two built-in files are rewritten; added languages are left alone.
     /// </summary>
-    const string Version = "23";
+    const string Version = "24";
 
     /// <summary>
     /// Bookkeeping entries rather than translated text: the version a file was written
@@ -297,6 +297,7 @@ public static class Loc
         ["main.startup"] = "Запуск",
         ["main.autostart"] = "Запускать вместе с Windows",
         ["main.autostart.note"] = "Подсветкой управляет OpenRGB, поэтому автозапуск CaseLight имеет смысл только вместе с автозапуском OpenRGB.",
+        ["main.autostart.other"] = "Запускается другая копия по адресу: {0}",
         ["main.autopaint"] = "Сразу начинать раскраску",
         ["openrgb.start"] = "Запуск сервера",
         ["main.serverstart"] = "Запускать OpenRGB, если он не запущен",
@@ -612,6 +613,7 @@ public static class Loc
         ["main.startup"] = "Startup",
         ["main.autostart"] = "Start with Windows",
         ["main.autostart.note"] = "The lighting is driven by OpenRGB, so starting CaseLight automatically only makes sense together with starting OpenRGB.",
+        ["main.autostart.other"] = "Another copy starts from: {0}",
         ["main.autopaint"] = "Start painting at once",
         ["openrgb.start"] = "Starting the server",
         ["main.serverstart"] = "Start OpenRGB if it is not running",
