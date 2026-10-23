@@ -56,6 +56,7 @@
   "main.startup": "Запуск",
   "main.autostart": "Запускать вместе с Windows",
   "main.autostart.note": "Подсветкой управляет OpenRGB, поэтому автозапуск CaseLight имеет смысл только вместе с автозапуском OpenRGB.",
+  "main.autostart.other": "Запускается другая копия по адресу: {0}",
   "main.autopaint": "Сразу начинать раскраску",
   "openrgb.start": "Запуск сервера",
   "main.serverstart": "Запускать OpenRGB, если он не запущен",
@@ -294,5 +295,5 @@
   "unit.s": " с",
   "off": "выключено",
   "_name": "Русский",
-  "_version": "23"
+  "_version": "24"
 }

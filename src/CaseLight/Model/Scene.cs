@@ -425,6 +425,16 @@ public sealed class Scene : ICalibrated
 
     public bool MinimizeToTray { get; set; } = true;
     public bool StartMinimized { get; set; }
+
+    /// <summary>
+    /// The autostart box, carried here so it applies and cancels like any other setting.
+    ///
+    /// The Run entry is the real state: the flag is read from it on launch and after an
+    /// import, and reaches it only on Apply. Whatever the file says is ignored - autostart
+    /// belongs to this machine and this copy of the program, not to the settings.
+    /// </summary>
+    public bool StartWithWindows { get; set; }
+
     public bool WriteLog { get; set; } = true;
 
     /// <summary>
