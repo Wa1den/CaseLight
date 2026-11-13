@@ -125,6 +125,14 @@ public sealed partial class MainWindow : Window
     /// </summary>
     bool _reallyClosing;
 
+    /// <summary>Settings ask for it, or the copy that restarted this one was out of sight.</summary>
+    readonly bool _startMinimized;
+
+    RuntimeWatch? _runtime;
+
+    /// <summary>Set when closing to restart onto a new runtime: whether the next copy starts hidden.</summary>
+    bool? _restartMinimized;
+
     /// <summary>When we last launched the server, so the wait can be reported honestly.</summary>
     long _serverStartedTicks;
 
@@ -198,7 +206,8 @@ public sealed partial class MainWindow : Window
         // Свёрнутым окно должно появиться сразу, до Show: свёрнутое в Loaded успевало секунду
         // постоять пустой рамкой, пока Loaded подключался к серверу и собирал разделы. Окну,
         // уходящему в трей, не нужна и кнопка на панели задач на это время.
-        if (_scene.StartMinimized)
+        _startMinimized = _scene.StartMinimized || RuntimeWatch.HasArg(RuntimeWatch.MinimizedArg);
+        if (_startMinimized)
         {
             WindowState = WindowState.Minimized;
             ShowActivated = false;
@@ -241,7 +250,7 @@ public sealed partial class MainWindow : Window
             SyncFixtureList();
             _view.FitToContent();
 
-            if (_scene.StartPaintingOnLaunch) StartPainting();
+            if (_scene.StartPaintingOnLaunch || RuntimeWatch.HasArg(RuntimeWatch.PaintingArg)) StartPainting();
 
             // Подписка на питание экрана отдаёт его состояние сразу, блокировка сессии
             // прочитана в конструкторе надзора, но события ни то, ни другое не рождает:
@@ -255,6 +264,18 @@ public sealed partial class MainWindow : Window
             // здесь. Кнопка на панели задач возвращается: она нужна, когда окно откроют из трея.
             if (WindowState == WindowState.Minimized && _scene.MinimizeToTray) Hide();
             ShowInTaskbar = true;
+
+            _runtime = new RuntimeWatch();
+            ProbeLog.Log(Loc.P("рантайм", "runtime"), Loc.P("слежу за ", "watching ") + _runtime.Describe());
+            _runtime.Replaced += (old, now) =>
+            {
+                ProbeLog.Log(Loc.P("рантайм", "runtime"),
+                    Loc.P($"{old} удалён обновлением, перезапуск на {now}",
+                          $"{old} removed by an update, restarting on {now}"));
+                _restartMinimized = !IsVisible || WindowState == WindowState.Minimized;
+                _reallyClosing = true;
+                Close();
+            };
         };
 
         StateChanged += (_, _) =>
@@ -297,7 +318,8 @@ public sealed partial class MainWindow : Window
             // размещения, когда раскраска и не запускалась.
             _painter.Stop(blackout: false);
 
-            if (_scene.OffOnExit)
+            // при перезапуске корпус гасить незачем: новая копия подхватит его через секунду
+            if (_scene.OffOnExit && _restartMinimized == null)
             {
                 _hub.Blackout();
                 RgbHub.Settle();
@@ -320,6 +342,15 @@ public sealed partial class MainWindow : Window
             // устройства плагинов возвращаются к своим эффектам: держать кадр после выхода некому
             _effects.Dispose();
             _plugins.Dispose();
+
+            // после устройств: новая копия подключается к тем же контроллерам и плагинам
+            if (_restartMinimized is bool minimized)
+            {
+                ((App)Application.Current).ReleaseSingleInstance();
+                if (RuntimeWatch.Launch(minimized, _paintingWanted)) RuntimeWatch.EndNow();
+                ProbeLog.Log(Loc.P("рантайм", "runtime"),
+                    Loc.P("не удалось запустить новую копию", "could not start a new copy"));
+            }
         };
     }
 
@@ -1515,7 +1546,7 @@ public sealed partial class MainWindow : Window
         // the card has nobody to show itself to. With the window open the card is enough,
         // and a balloon over it would say the same thing twice. The card is shown either
         // way - a balloon that was missed leaves nothing behind.
-        if (_scene.StartMinimized && _tray is { Visible: true })
+        if (_startMinimized && _tray is { Visible: true })
         {
             _tray.BalloonTipClicked -= OnUpdateBalloonClicked;
             _tray.BalloonTipClicked += OnUpdateBalloonClicked;

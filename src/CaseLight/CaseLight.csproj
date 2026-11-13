@@ -10,6 +10,8 @@
     <UseWindowsForms>true</UseWindowsForms>
     <Nullable>enable</Nullable>
     <LangVersion>latest</LangVersion>
+    <!-- RuntimeWatch зовёт CreateProcessW без маршалинга строк -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <Platforms>x64</Platforms>
     <PlatformTarget>x64</PlatformTarget>
     <RootNamespace>CaseLight</RootNamespace>
@@ -19,7 +21,7 @@
     <!-- ThemeMode (Fluent) is still marked experimental in .NET 9 -->
     <NoWarn>$(NoWarn);WPF0001</NoWarn>
 
-    <Version>1.14.1</Version>
+    <Version>1.14.2</Version>
     <Product>CaseLight</Product>
     <Authors>Wa1den</Authors>
     <Description>Подсветка корпуса как продолжение экрана, через OpenRGB</Description>
